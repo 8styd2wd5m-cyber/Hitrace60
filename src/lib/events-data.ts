@@ -23,10 +23,16 @@ export interface AdminEventOverview {
   counts: {
     categories: number;
     heats: number;
+    judgeAssignments: number;
     judges: number;
     participants: number;
     scores: number;
     stations: number;
+    validatedScores: number;
+  };
+  operations: {
+    completedStations: number | null;
+    latestScoreAt: string | null;
   };
 }
 
@@ -174,10 +180,16 @@ export async function loadAdminEventOverview(routeEventId: string): Promise<Admi
         counts: {
           categories: demoCategories.length,
           heats: demoHeats.length,
+          judgeAssignments: demoStations.filter((station) => station.isScored).length,
           judges: demoStations.filter((station) => station.isScored).length,
           participants: demoParticipants.length,
           scores: 0,
           stations: demoStations.filter((station) => station.isScored).length,
+          validatedScores: 0,
+        },
+        operations: {
+          completedStations: null,
+          latestScoreAt: null,
         },
       },
     };
@@ -195,7 +207,7 @@ export async function loadAdminEventOverview(routeEventId: string): Promise<Admi
   const supabase = createSupabaseServiceClient();
   const { data: eventRow, error: eventError } = await supabase
     .from('events')
-    .select('id,name,slug,edition_label,location,starts_at,ends_at,status,timezone')
+    .select('id,name,slug,edition_label,location,starts_at,ends_at,status,timezone,updated_at')
     .eq('id', resolvedEventId)
     .maybeSingle();
 
@@ -211,13 +223,28 @@ export async function loadAdminEventOverview(routeEventId: string): Promise<Admi
   }
 
   const event = eventRow as EventRow;
-  const [categoriesCount, stationsCount, participantsCount, heatsCount, judgesCount, scoresCount] = await Promise.all([
+  const [
+    categoriesCount,
+    stationsCount,
+    participantsCount,
+    heatsCount,
+    judgesCount,
+    judgeAssignmentsCount,
+    scoresCount,
+    validatedScoresCount,
+    completedStationsCount,
+    latestScoreAt,
+  ] = await Promise.all([
     countRows('categories', resolvedEventId),
     countRows('stations', resolvedEventId),
     countRows('participants', resolvedEventId),
     countRows('heats', resolvedEventId),
     countRows('judges', resolvedEventId),
+    countRows('judge_station_assignments', resolvedEventId),
     countRows('scores', resolvedEventId),
+    countRowsByStatuses('scores', resolvedEventId, ['validated', 'corrected']),
+    countCompletedStations(resolvedEventId),
+    loadLatestScoreAt(resolvedEventId),
   ]);
 
   return {
@@ -232,14 +259,21 @@ export async function loadAdminEventOverview(routeEventId: string): Promise<Admi
       endsAt: event.ends_at,
       status: event.status,
       timezone: event.timezone,
+      updatedAt: event.updated_at,
       source: 'supabase',
       counts: {
         categories: categoriesCount,
         heats: heatsCount,
+        judgeAssignments: judgeAssignmentsCount,
         judges: judgesCount,
         participants: participantsCount,
         scores: scoresCount,
         stations: stationsCount,
+        validatedScores: validatedScoresCount,
+      },
+      operations: {
+        completedStations: completedStationsCount,
+        latestScoreAt,
       },
     },
   };
@@ -254,4 +288,51 @@ async function countRows(table: string, eventId: string): Promise<number> {
   }
 
   return count ?? 0;
+}
+
+async function countRowsByStatuses(table: string, eventId: string, statuses: string[]): Promise<number> {
+  const supabase = createSupabaseServiceClient();
+  const { count, error } = await supabase
+    .from(table)
+    .select('*', { count: 'exact', head: true })
+    .eq('event_id', eventId)
+    .in('status', statuses);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return count ?? 0;
+}
+
+async function countCompletedStations(eventId: string): Promise<number | null> {
+  const supabase = createSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from('scores')
+    .select('station_id')
+    .eq('event_id', eventId)
+    .in('status', ['validated', 'corrected']);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return new Set((data ?? []).map((row) => row.station_id as string)).size;
+}
+
+async function loadLatestScoreAt(eventId: string): Promise<string | null> {
+  const supabase = createSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from('scores')
+    .select('updated_at')
+    .eq('event_id', eventId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data?.updated_at as string | undefined) ?? null;
 }

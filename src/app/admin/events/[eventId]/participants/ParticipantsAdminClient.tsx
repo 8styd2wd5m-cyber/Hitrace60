@@ -1,6 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import { deleteParticipantAction, saveParticipantAction } from './actions';
 import {
   buildParticipantFromInput,
   deleteParticipant,
@@ -16,6 +18,8 @@ interface ParticipantsAdminClientProps {
   eventId: string;
   members: ParticipantMember[];
   participants: Participant[];
+  routeEventId: string;
+  source: 'supabase' | 'demo';
 }
 
 const emptyMember = { firstName: '', lastName: '', gender: 'M' as const };
@@ -25,7 +29,11 @@ export function ParticipantsAdminClient({
   eventId,
   members,
   participants,
+  routeEventId,
+  source,
 }: ParticipantsAdminClientProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   const membersByParticipant = useMemo(() => groupMembersByParticipant(members), [members]);
   const initialParticipants = useMemo<ParticipantWithMembers[]>(
     () =>
@@ -42,6 +50,19 @@ export function ParticipantsAdminClient({
 
   const selectedCategory = categories.find((category) => category.id === form.categoryId) ?? categories[0];
   const editingParticipant = editingId ? items.find((item) => item.id === editingId) : null;
+
+  useEffect(() => {
+    setItems(initialParticipants);
+  }, [initialParticipants]);
+
+  useEffect(() => {
+    setForm((currentForm) => ({
+      ...currentForm,
+      eventId,
+      categoryId: currentForm.categoryId || categories[0]?.id || '',
+      members: currentForm.members.length ? currentForm.members : buildMemberSlots(categories[0]?.teamSize ?? 1),
+    }));
+  }, [categories, eventId]);
 
   function updateCategory(categoryId: string) {
     const category = categories.find((categoryItem) => categoryItem.id === categoryId);
@@ -75,6 +96,27 @@ export function ParticipantsAdminClient({
       return;
     }
 
+    if (source === 'supabase') {
+      startTransition(async () => {
+        const result = await saveParticipantAction(routeEventId, form);
+
+        if (!result.ok) {
+          setErrors(result.errors);
+          return;
+        }
+
+        const nextParticipant = {
+          ...result.participant,
+          members: result.members,
+        };
+        setItems((currentItems) => upsertParticipant(currentItems, nextParticipant));
+        setErrors([]);
+        resetForm();
+        router.refresh();
+      });
+      return;
+    }
+
     const nextParticipant = buildParticipantFromInput(form, categories);
     setItems((currentItems) => upsertParticipant(currentItems, nextParticipant));
     setErrors([]);
@@ -100,6 +142,27 @@ export function ParticipantsAdminClient({
   }
 
   function removeParticipant(participantId: string) {
+    if (source === 'supabase') {
+      startTransition(async () => {
+        const result = await deleteParticipantAction(routeEventId, eventId, participantId);
+
+        if (!result.ok) {
+          setErrors(result.errors);
+          return;
+        }
+
+        setItems((currentItems) => deleteParticipant(currentItems, participantId));
+        setErrors([]);
+
+        if (participantId === editingId) {
+          resetForm();
+        }
+
+        router.refresh();
+      });
+      return;
+    }
+
     setItems((currentItems) => deleteParticipant(currentItems, participantId));
 
     if (participantId === editingId) {
@@ -220,8 +283,13 @@ export function ParticipantsAdminClient({
             </div>
           </div>
 
-          <button className="rounded-md bg-zinc-950 px-4 py-4 text-lg font-black text-white" onClick={submitForm} type="button">
-            {editingParticipant ? 'Salva modifiche' : 'Crea partecipante'}
+          <button
+            className="rounded-md bg-zinc-950 px-4 py-4 text-lg font-black text-white disabled:cursor-not-allowed disabled:bg-zinc-300"
+            disabled={isPending || categories.length === 0}
+            onClick={submitForm}
+            type="button"
+          >
+            {isPending ? 'Salvataggio...' : editingParticipant ? 'Salva modifiche' : 'Crea partecipante'}
           </button>
         </div>
       </section>
@@ -230,9 +298,13 @@ export function ParticipantsAdminClient({
         <div className="flex flex-col justify-between gap-3 border-b border-zinc-200 pb-4 md:flex-row md:items-end">
           <div>
             <h2 className="text-2xl font-black">Partecipanti</h2>
-            <p className="mt-1 text-sm text-zinc-500">{items.length} iscritti locali in questa demo</p>
+            <p className="mt-1 text-sm text-zinc-500">
+              {items.length} iscritti · {source === 'supabase' ? 'persistenza Supabase attiva' : 'fallback locale demo'}
+            </p>
           </div>
-          <span className="rounded-md bg-lime-200 px-3 py-2 text-sm font-black">CRUD locale pronto per Supabase</span>
+          <span className="rounded-md bg-lime-200 px-3 py-2 text-sm font-black">
+            {source === 'supabase' ? 'DB reale' : 'CRUD locale'}
+          </span>
         </div>
 
         <div className="mt-5 grid gap-3">
@@ -261,7 +333,8 @@ export function ParticipantsAdminClient({
                       Modifica
                     </button>
                     <button
-                      className="rounded-md bg-red-50 px-3 py-2 font-bold text-red-700"
+                      className="rounded-md bg-red-50 px-3 py-2 font-bold text-red-700 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+                      disabled={isPending}
                       onClick={() => removeParticipant(participant.id)}
                       type="button"
                     >

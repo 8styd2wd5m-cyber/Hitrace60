@@ -35,13 +35,23 @@ export default async function ParticipantsPage({ params }: ParticipantsPageProps
             <Link className="rounded-md bg-white px-4 py-3 font-bold text-zinc-950 shadow-sm" href={`/admin/events/${eventId}/timeline`}>
               Timeline
             </Link>
-            <Link className="rounded-md bg-zinc-950 px-4 py-3 font-bold text-white" href="/">
-              Home
+            <Link className="rounded-md bg-zinc-950 px-4 py-3 font-bold text-white" href={`/admin/events/${eventId}`}>
+              Dashboard evento
+            </Link>
+            <Link className="rounded-md bg-white px-4 py-3 font-bold text-zinc-950 shadow-sm" href="/admin/events">
+              Tutte le edizioni
             </Link>
           </div>
         </header>
 
-        <ParticipantsAdminClient categories={categories} eventId={resolvedEventId} members={members} participants={participants} />
+        <ParticipantsAdminClient
+          categories={categories}
+          eventId={resolvedEventId}
+          members={members}
+          participants={participants}
+          routeEventId={eventId}
+          source={source}
+        />
       </div>
     </main>
   );

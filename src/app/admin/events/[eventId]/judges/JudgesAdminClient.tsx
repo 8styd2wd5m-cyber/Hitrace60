@@ -10,11 +10,20 @@ interface JudgesAdminClientProps {
 
 export function JudgesAdminClient({ links }: JudgesAdminClientProps) {
   const [copiedStationId, setCopiedStationId] = useState<string | null>(null);
+  const [copyErrorStationId, setCopyErrorStationId] = useState<string | null>(null);
 
   async function copyUrl(link: JudgeUtilityLink) {
     if (!link.url) return;
 
-    await window.navigator.clipboard.writeText(link.url);
+    const copied = await copyText(link.url);
+
+    if (!copied) {
+      setCopyErrorStationId(link.stationId);
+      window.setTimeout(() => setCopyErrorStationId(null), 3000);
+      return;
+    }
+
+    setCopyErrorStationId(null);
     setCopiedStationId(link.stationId);
     window.setTimeout(() => setCopiedStationId(null), 1500);
   }
@@ -71,8 +80,35 @@ export function JudgesAdminClient({ links }: JudgesAdminClientProps) {
           >
             {copiedStationId === link.stationId ? 'Copiato' : 'Copia URL'}
           </button>
+          {copyErrorStationId === link.stationId ? (
+            <p className="mt-2 text-sm font-bold text-amber-700">Copia manualmente il link.</p>
+          ) : null}
         </article>
       ))}
     </section>
   );
+}
+
+async function copyText(value: string): Promise<boolean> {
+  try {
+    if (window.navigator.clipboard?.writeText) {
+      await window.navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // Fallback below handles browsers or HTTP contexts without Clipboard API.
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textarea);
+
+  return copied;
 }

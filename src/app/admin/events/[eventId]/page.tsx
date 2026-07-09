@@ -86,8 +86,8 @@ export default async function AdminEventDashboardPage({ params }: AdminEventDash
             <Link className="rounded-md bg-lime-300 px-4 py-3 font-black text-zinc-950" href={`/display/${event.routeId}`}>
               Display live
             </Link>
-            <Link className="rounded-md bg-white px-4 py-3 font-black text-zinc-950" href="/">
-              Home
+            <Link className="rounded-md bg-white px-4 py-3 font-black text-zinc-950" href="/admin/events">
+              Tutte le edizioni
             </Link>
           </div>
         </header>

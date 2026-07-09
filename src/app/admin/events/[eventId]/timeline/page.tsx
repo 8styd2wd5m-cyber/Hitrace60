@@ -28,9 +28,14 @@ export default async function TimelinePage({ params }: TimelinePageProps) {
             <p className="text-sm font-black uppercase tracking-[0.2em] text-red-600">Admin</p>
             <h1 className="text-4xl font-black">Timeline HITRACE60</h1>
           </div>
-          <Link className="rounded-md bg-zinc-950 px-4 py-3 font-bold text-white" href="/">
-            Home
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link className="rounded-md bg-white px-4 py-3 font-bold text-zinc-950 shadow-sm" href={`/admin/events/${eventId}`}>
+              Dashboard evento
+            </Link>
+            <Link className="rounded-md bg-zinc-950 px-4 py-3 font-bold text-white" href="/admin/events">
+              Tutte le edizioni
+            </Link>
+          </div>
         </header>
         <TimelineBuilderClient
           categories={categories}

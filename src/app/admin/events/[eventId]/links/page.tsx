@@ -34,8 +34,8 @@ export default async function EventLinksPage({ params }: EventLinksPageProps) {
             <Link className="rounded-md bg-white px-4 py-3 font-bold text-zinc-950 shadow-sm" href={`/admin/events/${data.routeEventId}`}>
               Dashboard
             </Link>
-            <Link className="rounded-md bg-zinc-950 px-4 py-3 font-bold text-white" href="/">
-              Home
+            <Link className="rounded-md bg-zinc-950 px-4 py-3 font-bold text-white" href="/admin/events">
+              Tutte le edizioni
             </Link>
           </div>
         </header>

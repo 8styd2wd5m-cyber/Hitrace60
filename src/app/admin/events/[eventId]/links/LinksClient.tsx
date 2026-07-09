@@ -13,6 +13,7 @@ interface LinksClientProps {
 
 export function LinksClient({ adminLinks, displayLink, judgeLinks, source }: LinksClientProps) {
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const [copyErrorUrl, setCopyErrorUrl] = useState<string | null>(null);
   const [runtimeOrigin, setRuntimeOrigin] = useState('');
 
   useEffect(() => {
@@ -22,7 +23,15 @@ export function LinksClient({ adminLinks, displayLink, judgeLinks, source }: Lin
   async function copyUrl(url: string) {
     if (!url) return;
 
-    await window.navigator.clipboard.writeText(url);
+    const copied = await copyText(url);
+
+    if (!copied) {
+      setCopyErrorUrl(url);
+      window.setTimeout(() => setCopyErrorUrl(null), 3000);
+      return;
+    }
+
+    setCopyErrorUrl(null);
     setCopiedUrl(url);
     window.setTimeout(() => setCopiedUrl(null), 1500);
   }
@@ -52,14 +61,26 @@ export function LinksClient({ adminLinks, displayLink, judgeLinks, source }: Lin
               unoptimized
               width={220}
             />
-            <LinkLine copied={copiedUrl === displayLink.url} label="URL display" onCopy={() => copyUrl(displayLink.url)} url={displayLink.url} />
+            <LinkLine
+              copied={copiedUrl === displayLink.url}
+              copyError={copyErrorUrl === displayLink.url}
+              label="URL display"
+              onCopy={() => copyUrl(displayLink.url)}
+              url={displayLink.url}
+            />
           </article>
 
           <div className="grid gap-3 md:grid-cols-2">
             {adminLinks.map((link) => (
               <article className="rounded-md border border-zinc-200 p-4" key={link.label}>
                 <h3 className="text-lg font-black">{link.label}</h3>
-                <LinkLine copied={copiedUrl === link.url} label="URL" onCopy={() => copyUrl(link.url)} url={link.url} />
+                <LinkLine
+                  copied={copiedUrl === link.url}
+                  copyError={copyErrorUrl === link.url}
+                  label="URL"
+                  onCopy={() => copyUrl(link.url)}
+                  url={link.url}
+                />
               </article>
             ))}
           </div>
@@ -111,7 +132,13 @@ export function LinksClient({ adminLinks, displayLink, judgeLinks, source }: Lin
               ) : null}
             </dl>
 
-            <LinkLine copied={copiedUrl === link.url} label="URL giudice" onCopy={() => copyUrl(link.url)} url={link.url} />
+            <LinkLine
+              copied={copiedUrl === link.url}
+              copyError={copyErrorUrl === link.url}
+              label="URL giudice"
+              onCopy={() => copyUrl(link.url)}
+              url={link.url}
+            />
           </article>
         ))}
       </section>
@@ -121,11 +148,13 @@ export function LinksClient({ adminLinks, displayLink, judgeLinks, source }: Lin
 
 function LinkLine({
   copied,
+  copyError,
   label,
   onCopy,
   url,
 }: {
   copied: boolean;
+  copyError: boolean;
   label: string;
   onCopy: () => void;
   url: string;
@@ -142,6 +171,31 @@ function LinkLine({
       >
         {copied ? 'Copiato' : 'Copia link'}
       </button>
+      {copyError ? <p className="mt-2 text-sm font-bold text-amber-700">Copia manualmente il link.</p> : null}
     </div>
   );
+}
+
+async function copyText(value: string): Promise<boolean> {
+  try {
+    if (window.navigator.clipboard?.writeText) {
+      await window.navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // Fallback below handles non-secure contexts and browsers without Clipboard API.
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textarea);
+
+  return copied;
 }

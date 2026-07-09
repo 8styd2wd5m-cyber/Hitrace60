@@ -1,8 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
-import { CalendarDays, ExternalLink, LayoutDashboard, Link2, MapPin, Search, Timer, Trophy, Users } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { CalendarDays, Copy, ExternalLink, LayoutDashboard, Link2, MapPin, Search, Timer, Trophy, Users } from 'lucide-react';
+import { duplicateEventStructureAction, type DuplicateEventStructureInput } from './actions';
 import type { ReactNode } from 'react';
 import type { AdminEventListItem } from '@/lib/events-data.ts';
 import type { EventStatus } from '@/lib/types.ts';
@@ -31,6 +33,7 @@ const statusStyles: Record<EventStatus, string> = {
 export function EventsListClient({ events }: EventsListClientProps) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<'all' | EventStatus>('all');
+  const [duplicatingEvent, setDuplicatingEvent] = useState<AdminEventListItem | null>(null);
 
   const filteredEvents = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -91,7 +94,7 @@ export function EventsListClient({ events }: EventsListClientProps) {
       {filteredEvents.length ? (
         <section className="grid gap-4 xl:grid-cols-2">
           {filteredEvents.map((event) => (
-            <EventCard event={event} key={event.id} />
+            <EventCard event={event} key={event.id} onDuplicate={() => setDuplicatingEvent(event)} />
           ))}
         </section>
       ) : (
@@ -100,11 +103,13 @@ export function EventsListClient({ events }: EventsListClientProps) {
           <p className="mt-2 text-zinc-500">Modifica ricerca o filtro stato per vedere altre edizioni.</p>
         </section>
       )}
+
+      {duplicatingEvent ? <DuplicateEventDialog event={duplicatingEvent} onClose={() => setDuplicatingEvent(null)} /> : null}
     </div>
   );
 }
 
-function EventCard({ event }: { event: AdminEventListItem }) {
+function EventCard({ event, onDuplicate }: { event: AdminEventListItem; onDuplicate: () => void }) {
   return (
     <article className="rounded-lg bg-white p-5 shadow-sm ring-1 ring-zinc-100">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
@@ -142,9 +147,150 @@ function EventCard({ event }: { event: AdminEventListItem }) {
           <ActionLink href={`/admin/events/${event.routeId}/judges`} label="Giudici" />
           <ActionLink href={`/admin/events/${event.routeId}/links`} icon={<Link2 className="h-4 w-4" />} label="Live Links" />
           <ActionLink href={`/display/${event.routeId}`} icon={<ExternalLink className="h-4 w-4" />} label="Display" />
+          <button
+            className="inline-flex items-center gap-2 rounded-md bg-red-50 px-3 py-2 text-sm font-black text-red-700 transition hover:bg-red-100"
+            onClick={onDuplicate}
+            type="button"
+          >
+            <Copy className="h-4 w-4" aria-hidden="true" />
+            Duplica struttura
+          </button>
         </div>
       </div>
     </article>
+  );
+}
+
+function DuplicateEventDialog({ event, onClose }: { event: AdminEventListItem; onClose: () => void }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const suggestedName = event.name.replace(/giugno 2026/i, 'Ottobre 2026');
+  const [form, setForm] = useState<DuplicateEventStructureInput>(() => ({
+    copyCategories: true,
+    copyJudgeTokens: false,
+    copyJudges: true,
+    copySettings: true,
+    copyStations: true,
+    editionLabel: 'Ottobre 2026',
+    endsAt: '',
+    location: event.location ?? '',
+    name: suggestedName === event.name ? `${event.name} Copy` : suggestedName,
+    slug: slugify(suggestedName === event.name ? `${event.name} Copy` : suggestedName),
+    sourceEventId: event.routeId,
+    startsAt: '',
+  }));
+  const [error, setError] = useState<string | null>(null);
+
+  function updateField<K extends keyof DuplicateEventStructureInput>(key: K, value: DuplicateEventStructureInput[K]) {
+    setForm((currentForm) => ({
+      ...currentForm,
+      [key]: value,
+      ...(key === 'name' ? { slug: slugify(String(value)) } : {}),
+    }));
+  }
+
+  function submit() {
+    setError(null);
+    startTransition(async () => {
+      const result = await duplicateEventStructureAction(form);
+
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+
+      router.push(result.redirectTo);
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70 px-4 py-6">
+      <section className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white p-5 shadow-2xl">
+        <div className="flex flex-col justify-between gap-3 border-b border-zinc-200 pb-4 md:flex-row md:items-start">
+          <div>
+            <p className="text-sm font-black uppercase tracking-[0.2em] text-red-600">Duplica struttura</p>
+            <h2 className="mt-1 text-3xl font-black">{event.name}</h2>
+            <p className="mt-1 text-sm font-semibold text-zinc-500">
+              La nuova edizione parte senza partecipanti, heat, timeline, scorecard, scores o audit log.
+            </p>
+          </div>
+          <button className="rounded-md bg-zinc-100 px-3 py-2 font-black" onClick={onClose} type="button">
+            Chiudi
+          </button>
+        </div>
+
+        {error ? <div className="mt-4 rounded-md bg-red-50 p-3 text-sm font-bold text-red-700">{error}</div> : null}
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <TextField label="Nome evento" onChange={(value) => updateField('name', value)} value={form.name} />
+          <TextField label="Edition label" onChange={(value) => updateField('editionLabel', value)} value={form.editionLabel} />
+          <TextField label="Slug" onChange={(value) => updateField('slug', value.toLowerCase())} value={form.slug} />
+          <TextField label="Location" onChange={(value) => updateField('location', value)} value={form.location} />
+          <DateField label="Data inizio" onChange={(value) => updateField('startsAt', value)} value={form.startsAt} />
+          <DateField label="Data fine" onChange={(value) => updateField('endsAt', value)} value={form.endsAt} />
+        </div>
+
+        <fieldset className="mt-5 rounded-md border border-zinc-200 p-4">
+          <legend className="px-2 text-sm font-black uppercase text-zinc-500">Cosa copiare</legend>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Checkbox label="Copia categorie" onChange={(value) => updateField('copyCategories', value)} value={form.copyCategories} />
+            <Checkbox label="Copia stazioni" onChange={(value) => updateField('copyStations', value)} value={form.copyStations} />
+            <Checkbox label="Copia impostazioni" onChange={(value) => updateField('copySettings', value)} value={form.copySettings} />
+            <Checkbox label="Copia giudici" onChange={(value) => updateField('copyJudges', value)} value={form.copyJudges} />
+            <Checkbox label="Mantieni token compatibili" onChange={(value) => updateField('copyJudgeTokens', value)} value={form.copyJudgeTokens} />
+          </div>
+          <p className="mt-3 text-sm font-semibold text-zinc-500">
+            I token non vengono mai riutilizzati se puntano a un&apos;altra edizione: per sicurezza vengono rigenerati con il nuovo slug.
+          </p>
+        </fieldset>
+
+        <div className="mt-6 flex flex-col justify-end gap-2 sm:flex-row">
+          <button className="rounded-md bg-zinc-100 px-4 py-3 font-black" onClick={onClose} type="button">
+            Annulla
+          </button>
+          <button
+            className="rounded-md bg-red-600 px-4 py-3 font-black text-white disabled:bg-zinc-300"
+            disabled={isPending}
+            onClick={submit}
+            type="button"
+          >
+            {isPending ? 'Duplicazione...' : 'Duplica struttura'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function TextField({ label, onChange, value }: { label: string; onChange: (value: string) => void; value: string }) {
+  return (
+    <label className="text-sm font-bold">
+      {label}
+      <input className="mt-2 w-full rounded-md border border-zinc-300 px-3 py-3" onChange={(event) => onChange(event.target.value)} value={value} />
+    </label>
+  );
+}
+
+function DateField({ label, onChange, value }: { label: string; onChange: (value: string) => void; value: string }) {
+  return (
+    <label className="text-sm font-bold">
+      {label}
+      <input
+        className="mt-2 w-full rounded-md border border-zinc-300 px-3 py-3"
+        onChange={(event) => onChange(event.target.value)}
+        type="datetime-local"
+        value={value}
+      />
+    </label>
+  );
+}
+
+function Checkbox({ label, onChange, value }: { label: string; onChange: (value: boolean) => void; value: boolean }) {
+  return (
+    <label className="flex items-center justify-between gap-3 rounded-md bg-zinc-50 px-3 py-3 text-sm font-bold">
+      {label}
+      <input checked={value} className="h-5 w-5" onChange={(event) => onChange(event.target.checked)} type="checkbox" />
+    </label>
   );
 }
 
@@ -218,4 +364,14 @@ function formatDateTime(value: string | null | undefined): string {
     month: 'short',
     year: 'numeric',
   }).format(new Date(value));
+}
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
 }

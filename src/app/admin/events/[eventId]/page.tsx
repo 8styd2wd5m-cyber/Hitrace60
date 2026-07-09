@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { EventStatusControls } from './EventStatusControls';
+import { EventStatusBadge, EventStatusBanner } from '@/components/admin/EventStatus.tsx';
 import { loadAdminEventOverview } from '@/lib/events-data.ts';
 
 export const dynamic = 'force-dynamic';
@@ -77,6 +79,9 @@ export default async function AdminEventDashboardPage({ params }: AdminEventDash
         <header className="flex flex-col justify-between gap-4 rounded-lg bg-zinc-950 p-6 text-white md:flex-row md:items-end">
           <div>
             <p className="text-sm font-black uppercase tracking-[0.2em] text-lime-300">Admin evento</p>
+            <div className="mt-2">
+              <EventStatusBadge status={event.status} />
+            </div>
             <h1 className="mt-2 text-4xl font-black md:text-5xl">{event.name}</h1>
             <p className="mt-3 text-zinc-300">
               {event.location ?? 'Location non impostata'} · {formatDate(event.startsAt)} · {event.source === 'supabase' ? 'DB reale' : 'Fallback demo'}
@@ -101,11 +106,9 @@ export default async function AdminEventDashboardPage({ params }: AdminEventDash
           <Metric label="Score" value={event.counts.scores} />
         </section>
 
-        {event.status === 'completed' || event.status === 'archived' ? (
-          <section className="rounded-lg bg-amber-100 p-4 font-bold text-amber-950">
-            Edizione {event.status}: consultabile, modifiche operative da proteggere nei prossimi blocchi.
-          </section>
-        ) : null}
+        <EventStatusBanner status={event.status} />
+
+        <EventStatusControls routeEventId={event.routeId} status={event.status} />
 
         <section className="grid gap-4 md:grid-cols-3">
           {activeAdminLinks.map((item) => (

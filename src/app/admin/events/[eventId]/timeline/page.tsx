@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { TimelineBuilderClient } from './TimelineBuilderClient';
+import { EventStatusBadge, EventStatusBanner } from '@/components/admin/EventStatus.tsx';
 import { getAdminEventRedirectForMistakenJudgeToken } from '@/lib/event-id.ts';
 import { loadTimelineAdminData } from '@/lib/timeline-data.ts';
 
@@ -18,7 +19,7 @@ export default async function TimelinePage({ params }: TimelinePageProps) {
     redirect(`/admin/events/${redirectEventId}/timeline`);
   }
 
-  const { categories, participants, resolvedEventId, source } = await loadTimelineAdminData(eventId);
+  const { categories, eventStatus, participants, resolvedEventId, source } = await loadTimelineAdminData(eventId);
 
   return (
     <main className="min-h-screen bg-zinc-100 px-5 py-8">
@@ -26,6 +27,9 @@ export default async function TimelinePage({ params }: TimelinePageProps) {
         <header className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
           <div>
             <p className="text-sm font-black uppercase tracking-[0.2em] text-red-600">Admin</p>
+            <div className="mt-2">
+              <EventStatusBadge status={eventStatus} />
+            </div>
             <h1 className="text-4xl font-black">Timeline HITRACE60</h1>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -37,8 +41,10 @@ export default async function TimelinePage({ params }: TimelinePageProps) {
             </Link>
           </div>
         </header>
+        <EventStatusBanner status={eventStatus} />
         <TimelineBuilderClient
           categories={categories}
+          eventStatus={eventStatus}
           eventId={resolvedEventId}
           participants={participants}
           routeEventId={eventId}

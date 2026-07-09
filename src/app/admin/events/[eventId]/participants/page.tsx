@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { ParticipantsAdminClient } from './ParticipantsAdminClient';
+import { EventStatusBadge, EventStatusBanner } from '@/components/admin/EventStatus.tsx';
 import { getAdminEventRedirectForMistakenJudgeToken } from '@/lib/event-id.ts';
 import { loadParticipantsAdminData } from '@/lib/participants-data.ts';
 
@@ -18,7 +19,7 @@ export default async function ParticipantsPage({ params }: ParticipantsPageProps
     redirect(`/admin/events/${redirectEventId}/participants`);
   }
 
-  const { categories, eventId: resolvedEventId, members, participants, source } = await loadParticipantsAdminData(eventId);
+  const { categories, eventId: resolvedEventId, eventStatus, members, participants, source } = await loadParticipantsAdminData(eventId);
 
   return (
     <main className="min-h-screen bg-zinc-100 px-5 py-8">
@@ -26,6 +27,9 @@ export default async function ParticipantsPage({ params }: ParticipantsPageProps
         <header className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
           <div>
             <p className="text-sm font-black uppercase tracking-[0.2em] text-red-600">Admin</p>
+            <div className="mt-2">
+              <EventStatusBadge status={eventStatus} />
+            </div>
             <h1 className="text-4xl font-black">Partecipanti e team</h1>
             <p className="mt-2 max-w-2xl text-zinc-600">
               Crea individual, team da 2 e team da 3 con membri e categoria. Fonte dati: {source === 'supabase' ? 'DB reale' : 'fallback demo'}.
@@ -44,8 +48,11 @@ export default async function ParticipantsPage({ params }: ParticipantsPageProps
           </div>
         </header>
 
+        <EventStatusBanner status={eventStatus} />
+
         <ParticipantsAdminClient
           categories={categories}
+          eventStatus={eventStatus}
           eventId={resolvedEventId}
           members={members}
           participants={participants}

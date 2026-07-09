@@ -1,6 +1,7 @@
 'use server';
 
 import { hashJudgeToken } from '@/lib/judge-data.ts';
+import { assertJudgeWriteAllowed } from '@/lib/event-status.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from '@/lib/supabase/server.ts';
 import type { ScoreStatus } from '@/lib/types.ts';
 
@@ -43,6 +44,12 @@ export async function validateJudgeScoreAction(input: ValidateJudgeScoreInput): 
 
   if (!Number.isFinite(input.rawScore) || input.rawScore < 0) {
     return { ok: false, message: 'Score non valido' };
+  }
+
+  const statusError = await assertJudgeWriteAllowed(input.eventId);
+
+  if (statusError) {
+    return { ok: false, message: statusError };
   }
 
   const supabase = createSupabaseServiceClient();
@@ -136,6 +143,12 @@ export async function validateJudgeScoreAction(input: ValidateJudgeScoreInput): 
 export async function reopenJudgeScoreAction(input: ReopenJudgeScoreInput): Promise<JudgeScoreActionResult> {
   if (!hasSupabaseServerConfig()) {
     return { ok: false, message: 'Supabase non configurato' };
+  }
+
+  const statusError = await assertJudgeWriteAllowed(input.eventId);
+
+  if (statusError) {
+    return { ok: false, message: statusError };
   }
 
   const reason = input.reason.trim();

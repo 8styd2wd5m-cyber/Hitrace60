@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { saveTimelineAction } from './actions';
+import { canEditOperationalData } from '@/lib/event-status.ts';
 import { buildTimelinePdfRows } from '@/lib/pdf.ts';
 import {
   HITRACE60_STATION_TRANSITION_SECONDS,
@@ -12,17 +13,18 @@ import {
   generateHeatsForCategory,
   getScoreStationArrivalSchedule,
 } from '@/lib/timeline.ts';
-import type { Category, Participant } from '@/lib/types.ts';
+import type { Category, EventStatus, Participant } from '@/lib/types.ts';
 
 interface TimelineBuilderClientProps {
   eventId: string;
   categories: Category[];
+  eventStatus: EventStatus;
   participants: Participant[];
   routeEventId: string;
   source: 'supabase' | 'demo';
 }
 
-export function TimelineBuilderClient({ eventId, categories, participants, routeEventId, source }: TimelineBuilderClientProps) {
+export function TimelineBuilderClient({ eventId, eventStatus, categories, participants, routeEventId, source }: TimelineBuilderClientProps) {
   const defaultCategoryIds = categories.slice(0, Math.min(3, categories.length)).map((category) => category.id);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState(defaultCategoryIds);
   const [laneCount, setLaneCount] = useState(4);
@@ -38,6 +40,7 @@ export function TimelineBuilderClient({ eventId, categories, participants, route
   const [lastValidCategoryStarts, setLastValidCategoryStarts] = useState(() =>
     Object.fromEntries(categories.map((category, index) => [category.id, safeDateToISOString(defaultStartForCategory(index)) ?? new Date().toISOString()])),
   );
+  const isReadOnly = !canEditOperationalData(eventStatus);
 
   const selectedCategories = categories.filter((category) => selectedCategoryIds.includes(category.id));
   const invalidStartCategories = selectedCategories.filter((category) => !safeDateToISOString(categoryStarts[category.id]));
@@ -103,6 +106,11 @@ export function TimelineBuilderClient({ eventId, categories, participants, route
   }
 
   async function saveTimeline() {
+    if (isReadOnly) {
+      setSaveMessage('Edizione conclusa o archiviata: salvataggio timeline bloccato.');
+      return;
+    }
+
     setSaveMessage(null);
     setIsSaving(true);
 
@@ -145,6 +153,11 @@ export function TimelineBuilderClient({ eventId, categories, participants, route
         >
           {source === 'supabase' ? 'DB reale' : 'Fallback demo'}
         </p>
+        {isReadOnly ? (
+          <p className="mt-3 rounded-md bg-zinc-100 p-3 text-sm font-bold text-zinc-700">
+            Sola lettura: puoi consultare e stampare la timeline, ma non salvarla su DB in stato {eventStatus}.
+          </p>
+        ) : null}
 
         <fieldset className="mt-5 grid gap-2">
           <legend className="text-sm font-bold">Categorie</legend>
@@ -234,11 +247,11 @@ export function TimelineBuilderClient({ eventId, categories, participants, route
             <button
               className="rounded-md bg-lime-300 px-4 py-3 font-black text-zinc-950 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500"
               data-testid="timeline-save-db"
-              disabled={source !== 'supabase' || isSaving}
+              disabled={source !== 'supabase' || isSaving || isReadOnly}
               onClick={saveTimeline}
               type="button"
             >
-              {isSaving ? 'Salvataggio...' : 'Salva su DB reale'}
+              {isReadOnly ? 'Sola lettura' : isSaving ? 'Salvataggio...' : 'Salva su DB reale'}
             </button>
           </div>
         </div>

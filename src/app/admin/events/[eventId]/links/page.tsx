@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { LinksClient } from './LinksClient';
+import { EventStatusBadge, EventStatusBanner } from '@/components/admin/EventStatus.tsx';
 import { loadEventLinksData } from '@/lib/event-links.ts';
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +26,9 @@ export default async function EventLinksPage({ params }: EventLinksPageProps) {
         <header className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
           <div>
             <p className="text-sm font-black uppercase tracking-[0.2em] text-red-600">Admin evento</p>
+            <div className="mt-2">
+              <EventStatusBadge status={data.eventStatus} />
+            </div>
             <h1 className="text-4xl font-black">Live Links</h1>
             <p className="mt-2 max-w-2xl text-zinc-600">
               Hub operativo per distribuire rapidamente QR e URL a display, staff e giudici.
@@ -39,6 +43,8 @@ export default async function EventLinksPage({ params }: EventLinksPageProps) {
             </Link>
           </div>
         </header>
+
+        <EventStatusBanner status={data.eventStatus} />
 
         <LinksClient
           adminLinks={data.adminLinks}

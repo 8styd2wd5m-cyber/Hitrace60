@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { assertOperationalWriteAllowed } from '@/lib/event-status.ts';
 import { participantInputSchema, validateParticipantInput, type ParticipantInput } from '@/lib/participants.ts';
 import { resolveEventIdOrSlug } from '@/lib/event-id.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from '@/lib/supabase/server.ts';
@@ -72,6 +73,12 @@ export async function saveParticipantAction(routeEventId: string, input: Partici
 
   if (!resolvedEventId || resolvedEventId !== input.eventId) {
     return { ok: false, errors: ['Evento non valido o non coerente.'] };
+  }
+
+  const statusError = await assertOperationalWriteAllowed(resolvedEventId);
+
+  if (statusError) {
+    return { ok: false, errors: [statusError] };
   }
 
   const supabase = createSupabaseServiceClient();
@@ -148,6 +155,12 @@ export async function deleteParticipantAction(routeEventId: string, eventId: str
 
   if (!resolvedEventId || resolvedEventId !== eventId) {
     return { ok: false, errors: ['Evento non valido o non coerente.'] };
+  }
+
+  const statusError = await assertOperationalWriteAllowed(resolvedEventId);
+
+  if (statusError) {
+    return { ok: false, errors: [statusError] };
   }
 
   const supabase = createSupabaseServiceClient();

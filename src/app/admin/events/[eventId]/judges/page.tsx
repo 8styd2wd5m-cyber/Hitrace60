@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { JudgesAdminClient } from './JudgesAdminClient';
+import { EventStatusBadge, EventStatusBanner } from '@/components/admin/EventStatus.tsx';
 import { loadEventLinksData } from '@/lib/event-links.ts';
 
 interface JudgesPageProps {
@@ -23,6 +24,9 @@ export default async function JudgesPage({ params }: JudgesPageProps) {
         <header className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
           <div>
             <p className="text-sm font-black uppercase tracking-[0.2em] text-red-600">Admin</p>
+            <div className="mt-2">
+              <EventStatusBadge status={data.eventStatus} />
+            </div>
             <h1 className="text-4xl font-black">URL giudici HITRACE60</h1>
             <p className="mt-2 max-w-2xl text-zinc-600">
               Link locali per smartphone giudici. Ogni token apre una sola stazione e usa il race station order reale.
@@ -40,6 +44,7 @@ export default async function JudgesPage({ params }: JudgesPageProps) {
             </Link>
           </div>
         </header>
+        <EventStatusBanner status={data.eventStatus} />
         <JudgesAdminClient links={data.judgeLinks} />
       </div>
     </main>

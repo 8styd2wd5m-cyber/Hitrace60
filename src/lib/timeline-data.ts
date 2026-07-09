@@ -1,10 +1,11 @@
 import { demoCategories, demoParticipants } from './demo-data.ts';
 import { resolveEventIdOrSlug } from './event-id.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
-import type { Category, Participant, ParticipantStatus } from './types.ts';
+import type { Category, EventStatus, Participant, ParticipantStatus } from './types.ts';
 
 export interface TimelineAdminData {
   categories: Category[];
+  eventStatus: EventStatus;
   participants: Participant[];
   resolvedEventId: string;
   source: 'supabase' | 'demo';
@@ -35,6 +36,7 @@ export async function loadTimelineAdminData(eventId: string): Promise<TimelineAd
   if (!hasSupabaseServerConfig()) {
     return {
       categories: demoCategories.filter((category) => category.eventId === eventId),
+      eventStatus: 'live',
       participants: demoParticipants.filter((participant) => participant.eventId === eventId),
       resolvedEventId: eventId,
       source: 'demo',
@@ -48,7 +50,8 @@ export async function loadTimelineAdminData(eventId: string): Promise<TimelineAd
   }
 
   const supabase = createSupabaseServiceClient();
-  const [categoriesResult, participantsResult] = await Promise.all([
+  const [eventResult, categoriesResult, participantsResult] = await Promise.all([
+    supabase.from('events').select('status').eq('id', resolvedEventId).maybeSingle(),
     supabase
       .from('categories')
       .select('id,event_id,code,name,type,team_size,race_day,start_order')
@@ -61,7 +64,7 @@ export async function loadTimelineAdminData(eventId: string): Promise<TimelineAd
       .order('seed_order', { ascending: true }),
   ]);
 
-  const firstError = categoriesResult.error ?? participantsResult.error;
+  const firstError = eventResult.error ?? categoriesResult.error ?? participantsResult.error;
 
   if (firstError) {
     throw new Error(firstError.message);
@@ -69,6 +72,7 @@ export async function loadTimelineAdminData(eventId: string): Promise<TimelineAd
 
   return {
     categories: ((categoriesResult.data ?? []) as CategoryRow[]).map(mapCategory),
+    eventStatus: ((eventResult.data?.status as EventStatus | undefined) ?? 'draft'),
     participants: ((participantsResult.data ?? []) as ParticipantRow[]).map(mapParticipant),
     resolvedEventId,
     source: 'supabase',

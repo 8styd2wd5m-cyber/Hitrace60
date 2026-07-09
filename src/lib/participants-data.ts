@@ -1,11 +1,12 @@
 import { demoCategories, demoParticipantMembers, demoParticipants } from './demo-data.ts';
 import { resolveEventIdOrSlug } from './event-id.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
-import type { Category, Participant, ParticipantMember, ParticipantStatus } from './types.ts';
+import type { Category, EventStatus, Participant, ParticipantMember, ParticipantStatus } from './types.ts';
 
 export interface ParticipantsAdminData {
   categories: Category[];
   eventId: string;
+  eventStatus: EventStatus;
   members: ParticipantMember[];
   participants: Participant[];
   source: 'supabase' | 'demo';
@@ -49,6 +50,7 @@ export async function loadParticipantsAdminData(routeEventId: string): Promise<P
     return {
       categories: demoCategories.filter((category) => category.eventId === routeEventId),
       eventId: routeEventId,
+      eventStatus: 'live',
       members: demoParticipantMembers.filter((member) => participantIds.has(member.participantId)),
       participants,
       source: 'demo',
@@ -62,7 +64,8 @@ export async function loadParticipantsAdminData(routeEventId: string): Promise<P
   }
 
   const supabase = createSupabaseServiceClient();
-  const [categoriesResult, participantsResult] = await Promise.all([
+  const [eventResult, categoriesResult, participantsResult] = await Promise.all([
+    supabase.from('events').select('status').eq('id', resolvedEventId).maybeSingle(),
     supabase
       .from('categories')
       .select('id,event_id,code,name,type,team_size,race_day,start_order')
@@ -75,7 +78,7 @@ export async function loadParticipantsAdminData(routeEventId: string): Promise<P
       .order('seed_order', { ascending: true }),
   ]);
 
-  const firstError = categoriesResult.error ?? participantsResult.error;
+  const firstError = eventResult.error ?? categoriesResult.error ?? participantsResult.error;
 
   if (firstError) {
     throw new Error(firstError.message);
@@ -88,6 +91,7 @@ export async function loadParticipantsAdminData(routeEventId: string): Promise<P
   return {
     categories: ((categoriesResult.data ?? []) as CategoryRow[]).map(mapCategory),
     eventId: resolvedEventId,
+    eventStatus: ((eventResult.data?.status as EventStatus | undefined) ?? 'draft'),
     members,
     participants,
     source: 'supabase',

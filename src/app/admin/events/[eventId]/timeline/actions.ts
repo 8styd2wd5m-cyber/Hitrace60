@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { getRaceStationOrderBySlug } from '@/lib/constants.ts';
+import { assertOperationalWriteAllowed } from '@/lib/event-status.ts';
 import { resolveSupabaseEventId } from '@/lib/event-id.ts';
 import { generateScorecardsFromTimeline } from '@/lib/scorecards.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from '@/lib/supabase/server.ts';
@@ -89,6 +90,12 @@ export async function saveTimelineAction(input: SaveTimelineInput): Promise<Save
 
   if (input.selectedCategoryIds.length === 0) {
     return { ok: false, message: 'Seleziona almeno una categoria.' };
+  }
+
+  const statusError = await assertOperationalWriteAllowed(eventId);
+
+  if (statusError) {
+    return { ok: false, message: statusError };
   }
 
   const supabase = createSupabaseServiceClient();

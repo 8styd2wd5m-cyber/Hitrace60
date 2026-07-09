@@ -11,10 +11,12 @@ import {
   validateParticipantInput,
   type ParticipantInput,
 } from '@/lib/participants.ts';
-import type { Category, Participant, ParticipantMember, ParticipantWithMembers } from '@/lib/types.ts';
+import { canEditOperationalData } from '@/lib/event-status.ts';
+import type { Category, EventStatus, Participant, ParticipantMember, ParticipantWithMembers } from '@/lib/types.ts';
 
 interface ParticipantsAdminClientProps {
   categories: Category[];
+  eventStatus: EventStatus;
   eventId: string;
   members: ParticipantMember[];
   participants: Participant[];
@@ -26,6 +28,7 @@ const emptyMember = { firstName: '', lastName: '', gender: 'M' as const };
 
 export function ParticipantsAdminClient({
   categories,
+  eventStatus,
   eventId,
   members,
   participants,
@@ -47,6 +50,7 @@ export function ParticipantsAdminClient({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ParticipantInput>(() => createEmptyInput(eventId, categories[0]));
   const [errors, setErrors] = useState<string[]>([]);
+  const isReadOnly = !canEditOperationalData(eventStatus);
 
   const selectedCategory = categories.find((category) => category.id === form.categoryId) ?? categories[0];
   const editingParticipant = editingId ? items.find((item) => item.id === editingId) : null;
@@ -89,6 +93,11 @@ export function ParticipantsAdminClient({
   }
 
   function submitForm() {
+    if (isReadOnly) {
+      setErrors(['Edizione conclusa o archiviata: partecipanti in sola lettura.']);
+      return;
+    }
+
     const validation = validateParticipantInput(form, categories);
 
     if (!validation.valid) {
@@ -124,6 +133,11 @@ export function ParticipantsAdminClient({
   }
 
   function startEdit(participant: ParticipantWithMembers) {
+    if (isReadOnly) {
+      setErrors(['Edizione conclusa o archiviata: partecipanti in sola lettura.']);
+      return;
+    }
+
     setEditingId(participant.id);
     setErrors([]);
     setForm({
@@ -142,6 +156,11 @@ export function ParticipantsAdminClient({
   }
 
   function removeParticipant(participantId: string) {
+    if (isReadOnly) {
+      setErrors(['Edizione conclusa o archiviata: eliminazione bloccata.']);
+      return;
+    }
+
     if (source === 'supabase') {
       startTransition(async () => {
         const result = await deleteParticipantAction(routeEventId, eventId, participantId);
@@ -200,12 +219,19 @@ export function ParticipantsAdminClient({
           </div>
         ) : null}
 
+        {isReadOnly ? (
+          <div className="mt-4 rounded-md bg-zinc-100 p-3 text-sm font-bold text-zinc-700">
+            Sola lettura: non puoi creare, modificare o eliminare partecipanti in stato {eventStatus}.
+          </div>
+        ) : null}
+
         <div className="mt-5 grid gap-4">
           <label className="text-sm font-bold">
             Categoria
             <select
               className="mt-2 w-full rounded-md border border-zinc-300 px-3 py-3"
               onChange={(event) => updateCategory(event.target.value)}
+              disabled={isReadOnly}
               value={form.categoryId}
             >
               {categories.map((category) => (
@@ -222,6 +248,7 @@ export function ParticipantsAdminClient({
               className="mt-2 w-full rounded-md border border-zinc-300 px-3 py-3"
               onChange={(event) => setForm((currentForm) => ({ ...currentForm, displayName: event.target.value }))}
               placeholder="Es. Team Alpha"
+              disabled={isReadOnly}
               value={form.displayName}
             />
           </label>
@@ -233,6 +260,7 @@ export function ParticipantsAdminClient({
                 className="mt-2 w-full rounded-md border border-zinc-300 px-3 py-3"
                 onChange={(event) => setForm((currentForm) => ({ ...currentForm, bibNumber: event.target.value }))}
                 placeholder="42"
+                disabled={isReadOnly}
                 value={form.bibNumber ?? ''}
               />
             </label>
@@ -243,6 +271,7 @@ export function ParticipantsAdminClient({
                 min={0}
                 onChange={(event) => setForm((currentForm) => ({ ...currentForm, seedOrder: Number(event.target.value) }))}
                 type="number"
+                disabled={isReadOnly}
                 value={form.seedOrder}
               />
             </label>
@@ -260,6 +289,7 @@ export function ParticipantsAdminClient({
                       className="rounded-md border border-zinc-300 px-3 py-3"
                       onChange={(event) => updateMember(index, 'firstName', event.target.value)}
                       placeholder="Nome"
+                      disabled={isReadOnly}
                       value={member.firstName}
                     />
                     <input
@@ -267,11 +297,13 @@ export function ParticipantsAdminClient({
                       className="rounded-md border border-zinc-300 px-3 py-3"
                       onChange={(event) => updateMember(index, 'lastName', event.target.value)}
                       placeholder="Cognome"
+                      disabled={isReadOnly}
                       value={member.lastName}
                     />
                     <select
                       className="rounded-md border border-zinc-300 px-3 py-3"
                       onChange={(event) => updateMember(index, 'gender', event.target.value)}
+                      disabled={isReadOnly}
                       value={member.gender}
                     >
                       <option value="M">M</option>
@@ -285,11 +317,11 @@ export function ParticipantsAdminClient({
 
           <button
             className="rounded-md bg-zinc-950 px-4 py-4 text-lg font-black text-white disabled:cursor-not-allowed disabled:bg-zinc-300"
-            disabled={isPending || categories.length === 0}
+            disabled={isPending || categories.length === 0 || isReadOnly}
             onClick={submitForm}
             type="button"
           >
-            {isPending ? 'Salvataggio...' : editingParticipant ? 'Salva modifiche' : 'Crea partecipante'}
+            {isReadOnly ? 'Sola lettura' : isPending ? 'Salvataggio...' : editingParticipant ? 'Salva modifiche' : 'Crea partecipante'}
           </button>
         </div>
       </section>
@@ -329,12 +361,17 @@ export function ParticipantsAdminClient({
                     </p>
                   </div>
                   <div className="flex gap-2">
-                    <button className="rounded-md bg-zinc-100 px-3 py-2 font-bold" onClick={() => startEdit(participant)} type="button">
+                    <button
+                      className="rounded-md bg-zinc-100 px-3 py-2 font-bold disabled:cursor-not-allowed disabled:text-zinc-400"
+                      disabled={isReadOnly}
+                      onClick={() => startEdit(participant)}
+                      type="button"
+                    >
                       Modifica
                     </button>
                     <button
                       className="rounded-md bg-red-50 px-3 py-2 font-bold text-red-700 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
-                      disabled={isPending}
+                      disabled={isPending || isReadOnly}
                       onClick={() => removeParticipant(participant.id)}
                       type="button"
                     >

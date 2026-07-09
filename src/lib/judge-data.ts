@@ -9,6 +9,7 @@ import {
 } from './demo-data.ts';
 import { buildJudgeScorecardRows } from './scorecards.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
+import { canJudgeSubmitScores } from './event-status.ts';
 import { getRaceStationOrderBySlug } from './constants.ts';
 import type {
   Heat,
@@ -253,6 +254,23 @@ async function loadSupabaseJudgePageData(token: string): Promise<JudgePageLoadRe
 
   const eventId = activeAssignments[0].event_id;
   const stationIds = activeAssignments.map((assignment) => assignment.station_id);
+  const { data: eventRow, error: eventError } = await supabase.from('events').select('status').eq('id', eventId).maybeSingle();
+
+  if (eventError || !eventRow) {
+    return {
+      status: 'configuration_error',
+      source: 'supabase',
+      message: eventError?.message ?? 'Evento giudice non trovato.',
+    };
+  }
+
+  if (!canJudgeSubmitScores(eventRow.status)) {
+    return {
+      status: 'configuration_error',
+      source: 'supabase',
+      message: eventRow.status === 'completed' || eventRow.status === 'archived' ? 'La gara e conclusa.' : 'La gara non e ancora live.',
+    };
+  }
 
   const [
     { data: categoryRows, error: categoriesError },

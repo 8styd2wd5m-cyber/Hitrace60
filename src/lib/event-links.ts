@@ -7,6 +7,7 @@ import {
   resolveEventIdOrSlug,
 } from './event-id.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
+import type { EventStatus } from './types.ts';
 
 export interface EventUtilityLink {
   label: string;
@@ -31,6 +32,7 @@ export interface EventLinksData {
   displayLink: EventUtilityLink;
   judgeLinks: JudgeUtilityLink[];
   routeEventId: string;
+  eventStatus: EventStatus;
   source: 'supabase' | 'demo';
 }
 
@@ -80,6 +82,7 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
       displayLink,
       judgeLinks,
       routeEventId,
+      eventStatus: 'live',
       source: 'demo',
     };
   }
@@ -92,12 +95,14 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
       displayLink,
       judgeLinks: await buildMissingJudgeLinks(baseUrl, `Evento "${routeEventId}" non trovato`),
       routeEventId,
+      eventStatus: 'draft',
       source: 'supabase',
     };
   }
 
   const supabase = createSupabaseServiceClient();
-  const [stationsResult, assignmentsResult] = await Promise.all([
+  const [eventResult, stationsResult, assignmentsResult] = await Promise.all([
+    supabase.from('events').select('status').eq('id', resolvedEventId).maybeSingle(),
     supabase
       .from('stations')
       .select('id,name,slug,station_order,is_scored,active')
@@ -107,7 +112,7 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
     supabase.from('judge_station_assignments').select('id,station_id,qr_url,active').eq('event_id', resolvedEventId),
   ]);
 
-  const firstError = stationsResult.error ?? assignmentsResult.error;
+  const firstError = eventResult.error ?? stationsResult.error ?? assignmentsResult.error;
 
   if (firstError) {
     return {
@@ -115,6 +120,7 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
       displayLink,
       judgeLinks: await buildMissingJudgeLinks(baseUrl, firstError.message),
       routeEventId,
+      eventStatus: 'draft',
       source: 'supabase',
     };
   }
@@ -135,6 +141,7 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
     displayLink,
     judgeLinks: judgeLinks.length ? judgeLinks : await buildMissingJudgeLinks(baseUrl, 'Stazioni score mancanti nel database'),
     routeEventId,
+    eventStatus: ((eventResult.data?.status as EventStatus | undefined) ?? 'draft'),
     source: 'supabase',
   };
 }

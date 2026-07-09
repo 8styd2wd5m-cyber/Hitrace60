@@ -174,7 +174,7 @@ async function buildSupabaseJudgeLink(
   station: StationRow,
   assignment: AssignmentRow | undefined,
 ): Promise<JudgeUtilityLink> {
-  const token = HITRACE_JUDGE_TOKENS_BY_STATION_SLUG[station.slug] ?? '';
+  const token = extractJudgeTokenFromQrUrl(assignment?.qr_url) ?? HITRACE_JUDGE_TOKENS_BY_STATION_SLUG[station.slug] ?? '';
   const url = token ? `${baseUrl}/judge/${token}` : '';
   const ready = Boolean(station.active && assignment && token);
 
@@ -195,4 +195,14 @@ async function buildSupabaseJudgeLink(
           : 'Token non configurato',
     qrDataUrl: token ? await QRCode.toDataURL(url, { margin: 1, width: 180 }) : null,
   };
+}
+
+function extractJudgeTokenFromQrUrl(qrUrl: string | null | undefined): string | null {
+  if (!qrUrl) {
+    return null;
+  }
+
+  const match = qrUrl.match(/\/judge\/([^/?#]+)/);
+
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
 }

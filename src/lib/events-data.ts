@@ -40,6 +40,11 @@ export interface AdminEventListItem {
   status: EventStatus;
   timezone?: string | null;
   source: 'supabase' | 'demo';
+  counts: {
+    heats: number;
+    participants: number;
+    scores: number;
+  };
 }
 
 export type AdminEventLookupResult =
@@ -82,6 +87,11 @@ export async function listAdminEvents(): Promise<AdminEventListItem[]> {
         status: 'live',
         timezone: 'Europe/Rome',
         source: 'demo',
+        counts: {
+          heats: demoHeats.length,
+          participants: demoParticipants.length,
+          scores: 0,
+        },
       },
     ];
   }
@@ -96,18 +106,33 @@ export async function listAdminEvents(): Promise<AdminEventListItem[]> {
     throw new Error(error.message);
   }
 
-  return ((data ?? []) as EventRow[]).map((event) => ({
-    id: event.id,
-    routeId: event.slug ?? (event.id === resolveSupabaseEventId(LOCAL_DEMO_EVENT_ALIAS) ? LOCAL_DEMO_EVENT_ALIAS : event.id),
-    name: event.name,
-    editionLabel: event.edition_label,
-    location: event.location,
-    startsAt: event.starts_at,
-    endsAt: event.ends_at,
-    status: event.status,
-    timezone: event.timezone,
-    source: 'supabase',
-  }));
+  return Promise.all(
+    ((data ?? []) as EventRow[]).map(async (event) => {
+      const [participantsCount, heatsCount, scoresCount] = await Promise.all([
+        countRows('participants', event.id),
+        countRows('heats', event.id),
+        countRows('scores', event.id),
+      ]);
+
+      return {
+        id: event.id,
+        routeId: event.slug ?? (event.id === resolveSupabaseEventId(LOCAL_DEMO_EVENT_ALIAS) ? LOCAL_DEMO_EVENT_ALIAS : event.id),
+        name: event.name,
+        editionLabel: event.edition_label,
+        location: event.location,
+        startsAt: event.starts_at,
+        endsAt: event.ends_at,
+        status: event.status,
+        timezone: event.timezone,
+        source: 'supabase' as const,
+        counts: {
+          heats: heatsCount,
+          participants: participantsCount,
+          scores: scoresCount,
+        },
+      };
+    }),
+  );
 }
 
 export async function loadAdminEventOverview(routeEventId: string): Promise<AdminEventLookupResult> {

@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { ParticipantsAdminClient } from './ParticipantsAdminClient';
-import { demoCategories, demoParticipantMembers, demoParticipants } from '@/lib/demo-data.ts';
 import { getAdminEventRedirectForMistakenJudgeToken } from '@/lib/event-id.ts';
+import { loadParticipantsAdminData } from '@/lib/participants-data.ts';
 
 interface ParticipantsPageProps {
   params: Promise<{
@@ -18,10 +18,7 @@ export default async function ParticipantsPage({ params }: ParticipantsPageProps
     redirect(`/admin/events/${redirectEventId}/participants`);
   }
 
-  const categories = demoCategories.filter((category) => category.eventId === eventId);
-  const participants = demoParticipants.filter((participant) => participant.eventId === eventId);
-  const participantIds = new Set(participants.map((participant) => participant.id));
-  const members = demoParticipantMembers.filter((member) => participantIds.has(member.participantId));
+  const { categories, eventId: resolvedEventId, members, participants, source } = await loadParticipantsAdminData(eventId);
 
   return (
     <main className="min-h-screen bg-zinc-100 px-5 py-8">
@@ -31,8 +28,7 @@ export default async function ParticipantsPage({ params }: ParticipantsPageProps
             <p className="text-sm font-black uppercase tracking-[0.2em] text-red-600">Admin</p>
             <h1 className="text-4xl font-black">Partecipanti e team</h1>
             <p className="mt-2 max-w-2xl text-zinc-600">
-              Crea individual, team da 2 e team da 3 con membri e categoria. In questo blocco i dati sono locali demo;
-              nel Blocco 3 verranno salvati su Supabase.
+              Crea individual, team da 2 e team da 3 con membri e categoria. Fonte dati: {source === 'supabase' ? 'DB reale' : 'fallback demo'}.
             </p>
           </div>
           <div className="flex gap-2">
@@ -45,7 +41,7 @@ export default async function ParticipantsPage({ params }: ParticipantsPageProps
           </div>
         </header>
 
-        <ParticipantsAdminClient categories={categories} eventId={eventId} members={members} participants={participants} />
+        <ParticipantsAdminClient categories={categories} eventId={resolvedEventId} members={members} participants={participants} />
       </div>
     </main>
   );

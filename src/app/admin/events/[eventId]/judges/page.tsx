@@ -1,8 +1,7 @@
 import Link from 'next/link';
-import QRCode from 'qrcode';
-import { JudgesAdminClient, type JudgeStationLink } from './JudgesAdminClient';
-import { HITRACE_JUDGE_TOKENS_BY_STATION_SLUG } from '@/lib/constants.ts';
-import { demoStations } from '@/lib/demo-data.ts';
+import { redirect } from 'next/navigation';
+import { JudgesAdminClient } from './JudgesAdminClient';
+import { loadEventLinksData } from '@/lib/event-links.ts';
 
 interface JudgesPageProps {
   params: Promise<{
@@ -10,28 +9,13 @@ interface JudgesPageProps {
   }>;
 }
 
-const DEFAULT_LOCAL_BASE_URL = 'http://192.168.31.245:3000';
-
 export default async function JudgesPage({ params }: JudgesPageProps) {
   const { eventId } = await params;
-  const baseUrl = process.env.NEXT_PUBLIC_JUDGE_BASE_URL ?? DEFAULT_LOCAL_BASE_URL;
-  const stations = demoStations.filter((station) => station.eventId === eventId && station.isScored);
-  const links: JudgeStationLink[] = await Promise.all(
-    stations.map(async (station) => {
-      const token = HITRACE_JUDGE_TOKENS_BY_STATION_SLUG[station.slug] ?? '';
-      const url = token ? `${baseUrl}/judge/${token}` : '';
+  const data = await loadEventLinksData(eventId);
 
-      return {
-        stationId: station.id,
-        stationName: station.name,
-        token,
-        url,
-        raceStationOrder: station.raceStationOrder ?? station.stationOrder * 2 - 1,
-        ready: Boolean(token),
-        qrDataUrl: token ? await QRCode.toDataURL(url, { margin: 1, width: 160 }) : null,
-      };
-    }),
-  );
+  if ('redirectEventId' in data) {
+    redirect(`/admin/events/${data.redirectEventId}/judges`);
+  }
 
   return (
     <main className="min-h-screen bg-zinc-100 px-5 py-8">
@@ -48,12 +32,15 @@ export default async function JudgesPage({ params }: JudgesPageProps) {
             <Link className="rounded-md bg-white px-4 py-3 font-bold text-zinc-950 shadow-sm" href={`/admin/events/${eventId}/timeline`}>
               Timeline
             </Link>
+            <Link className="rounded-md bg-lime-300 px-4 py-3 font-bold text-zinc-950 shadow-sm" href={`/admin/events/${eventId}/links`}>
+              Live Links
+            </Link>
             <Link className="rounded-md bg-zinc-950 px-4 py-3 font-bold text-white" href="/">
               Home
             </Link>
           </div>
         </header>
-        <JudgesAdminClient links={links} />
+        <JudgesAdminClient links={data.judgeLinks} />
       </div>
     </main>
   );

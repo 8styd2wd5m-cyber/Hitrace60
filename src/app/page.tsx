@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { DEMO_EVENT_ID, DEMO_JUDGE_TOKEN } from '@/lib/demo-data.ts';
+import { DEMO_EVENT_ID, DEMO_SEEDED_JUDGE_TOKEN } from '@/lib/demo-data.ts';
 
 export default function HomePage() {
   return (
@@ -24,7 +24,7 @@ export default function HomePage() {
           </Link>
           <Link
             className="rounded-lg border border-white/15 bg-lime-300 p-5 text-zinc-950 transition hover:-translate-y-0.5"
-            href={`/judge/${DEMO_JUDGE_TOKEN}`}
+            href={`/judge/${DEMO_SEEDED_JUDGE_TOKEN}`}
           >
             <span className="text-sm font-bold uppercase text-zinc-700">Giudice</span>
             <strong className="mt-3 block text-2xl">Score mobile</strong>

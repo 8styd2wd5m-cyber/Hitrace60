@@ -1,6 +1,8 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { ParticipantsAdminClient } from './ParticipantsAdminClient';
 import { demoCategories, demoParticipantMembers, demoParticipants } from '@/lib/demo-data.ts';
+import { getAdminEventRedirectForMistakenJudgeToken } from '@/lib/event-id.ts';
 
 interface ParticipantsPageProps {
   params: Promise<{
@@ -10,6 +12,12 @@ interface ParticipantsPageProps {
 
 export default async function ParticipantsPage({ params }: ParticipantsPageProps) {
   const { eventId } = await params;
+  const redirectEventId = getAdminEventRedirectForMistakenJudgeToken(eventId);
+
+  if (redirectEventId) {
+    redirect(`/admin/events/${redirectEventId}/participants`);
+  }
+
   const categories = demoCategories.filter((category) => category.eventId === eventId);
   const participants = demoParticipants.filter((participant) => participant.eventId === eventId);
   const participantIds = new Set(participants.map((participant) => participant.id));

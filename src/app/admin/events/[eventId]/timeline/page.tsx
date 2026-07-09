@@ -1,5 +1,7 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { TimelineBuilderClient } from './TimelineBuilderClient';
+import { getAdminEventRedirectForMistakenJudgeToken } from '@/lib/event-id.ts';
 import { loadTimelineAdminData } from '@/lib/timeline-data.ts';
 
 interface TimelinePageProps {
@@ -10,6 +12,12 @@ interface TimelinePageProps {
 
 export default async function TimelinePage({ params }: TimelinePageProps) {
   const { eventId } = await params;
+  const redirectEventId = getAdminEventRedirectForMistakenJudgeToken(eventId);
+
+  if (redirectEventId) {
+    redirect(`/admin/events/${redirectEventId}/timeline`);
+  }
+
   const { categories, participants, resolvedEventId, source } = await loadTimelineAdminData(eventId);
 
   return (

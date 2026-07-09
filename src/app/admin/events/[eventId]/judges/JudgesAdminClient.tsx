@@ -2,25 +2,16 @@
 
 import Image from 'next/image';
 import { useState } from 'react';
-
-export interface JudgeStationLink {
-  stationId: string;
-  stationName: string;
-  token: string;
-  url: string;
-  raceStationOrder: number;
-  ready: boolean;
-  qrDataUrl: string | null;
-}
+import type { JudgeUtilityLink } from '@/lib/event-links.ts';
 
 interface JudgesAdminClientProps {
-  links: JudgeStationLink[];
+  links: JudgeUtilityLink[];
 }
 
 export function JudgesAdminClient({ links }: JudgesAdminClientProps) {
   const [copiedStationId, setCopiedStationId] = useState<string | null>(null);
 
-  async function copyUrl(link: JudgeStationLink) {
+  async function copyUrl(link: JudgeUtilityLink) {
     if (!link.url) return;
 
     await window.navigator.clipboard.writeText(link.url);

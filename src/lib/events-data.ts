@@ -18,6 +18,7 @@ export interface AdminEventOverview {
   endsAt: string | null;
   status: EventStatus;
   timezone?: string | null;
+  updatedAt?: string | null;
   source: 'supabase' | 'demo';
   counts: {
     categories: number;
@@ -39,6 +40,7 @@ export interface AdminEventListItem {
   endsAt: string | null;
   status: EventStatus;
   timezone?: string | null;
+  updatedAt?: string | null;
   source: 'supabase' | 'demo';
   counts: {
     heats: number;
@@ -71,6 +73,7 @@ interface EventRow {
   ends_at: string | null;
   status: EventStatus;
   timezone?: string | null;
+  updated_at?: string | null;
 }
 
 export async function listAdminEvents(): Promise<AdminEventListItem[]> {
@@ -86,6 +89,7 @@ export async function listAdminEvents(): Promise<AdminEventListItem[]> {
         endsAt: '2026-07-07T18:00:00+02:00',
         status: 'live',
         timezone: 'Europe/Rome',
+        updatedAt: null,
         source: 'demo',
         counts: {
           heats: demoHeats.length,
@@ -99,7 +103,7 @@ export async function listAdminEvents(): Promise<AdminEventListItem[]> {
   const supabase = createSupabaseServiceClient();
   const { data, error } = await supabase
     .from('events')
-    .select('id,name,slug,edition_label,location,starts_at,ends_at,status,timezone')
+    .select('id,name,slug,edition_label,location,starts_at,ends_at,status,timezone,updated_at')
     .order('starts_at', { ascending: false });
 
   if (error) {
@@ -124,6 +128,7 @@ export async function listAdminEvents(): Promise<AdminEventListItem[]> {
         endsAt: event.ends_at,
         status: event.status,
         timezone: event.timezone,
+        updatedAt: event.updated_at,
         source: 'supabase' as const,
         counts: {
           heats: heatsCount,

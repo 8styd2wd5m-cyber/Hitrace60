@@ -34,8 +34,25 @@ export type DuplicateEventStructureResult =
       error: string;
     };
 
+export interface DeleteEventEditionInput {
+  routeEventId: string;
+  confirmationSlug: string;
+}
+
+export type DeleteEventEditionResult =
+  | {
+      ok: true;
+      deletedEventId: string;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
 interface EventRow {
   id: string;
+  slug?: string | null;
+  status?: EventStatus;
   timezone: string | null;
 }
 
@@ -180,6 +197,85 @@ export async function duplicateEventStructureAction(
     ok: true,
     redirectTo: `/admin/events/${createdEvent.slug ?? createdEvent.id}`,
   };
+}
+
+export async function deleteEventEditionAction(input: DeleteEventEditionInput): Promise<DeleteEventEditionResult> {
+  if (!hasSupabaseServerConfig()) {
+    return {
+      ok: false,
+      error: 'Supabase non configurato: eliminazione disponibile solo con DB reale.',
+    };
+  }
+
+  const resolvedEventId = await resolveEventIdOrSlug(input.routeEventId);
+
+  if (!resolvedEventId) {
+    return { ok: false, error: 'Evento non trovato.' };
+  }
+
+  const supabase = createSupabaseServiceClient();
+  const { data: eventRow, error: eventError } = await supabase
+    .from('events')
+    .select('id,slug,status,timezone')
+    .eq('id', resolvedEventId)
+    .maybeSingle();
+
+  if (eventError || !eventRow) {
+    return { ok: false, error: eventError?.message ?? 'Evento non trovato.' };
+  }
+
+  const event = eventRow as EventRow;
+  const expectedSlug = event.slug ?? input.routeEventId;
+
+  if (input.confirmationSlug.trim() !== expectedSlug) {
+    return { ok: false, error: `Digita esattamente "${expectedSlug}" per eliminare questa edizione.` };
+  }
+
+  if (event.status !== 'draft' && event.status !== 'published') {
+    return { ok: false, error: 'Puoi eliminare solo edizioni in stato draft o published.' };
+  }
+
+  const deleteError = await deleteEventGraph(resolvedEventId);
+
+  if (deleteError) {
+    return { ok: false, error: deleteError };
+  }
+
+  revalidatePath('/admin/events');
+
+  return {
+    ok: true,
+    deletedEventId: resolvedEventId,
+  };
+}
+
+async function deleteEventGraph(eventId: string): Promise<string | null> {
+  const supabase = createSupabaseServiceClient();
+  const deleteSteps: Array<() => Promise<{ error: { message: string } | null }>> = [
+    async () => await supabase.from('audit_logs').delete().eq('event_id', eventId),
+    async () => await supabase.from('scores').delete().eq('event_id', eventId),
+    async () => await supabase.from('scorecards').delete().eq('event_id', eventId),
+    async () => await supabase.from('timeline_blocks').delete().eq('event_id', eventId),
+    async () => await supabase.from('judge_station_assignments').delete().eq('event_id', eventId),
+    async () => await supabase.from('heats').delete().eq('event_id', eventId),
+    async () => await supabase.from('participants').delete().eq('event_id', eventId),
+    async () => await supabase.from('judges').delete().eq('event_id', eventId),
+    async () => await supabase.from('stations').delete().eq('event_id', eventId),
+    async () => await supabase.from('categories').delete().eq('event_id', eventId),
+    async () => await supabase.from('event_settings').delete().eq('event_id', eventId),
+    async () => await supabase.from('event_admins').delete().eq('event_id', eventId),
+    async () => await supabase.from('events').delete().eq('id', eventId),
+  ];
+
+  for (const deleteStep of deleteSteps) {
+    const { error } = await deleteStep();
+
+    if (error) {
+      return error.message;
+    }
+  }
+
+  return null;
 }
 
 function validateInput(input: DuplicateEventStructureInput): string | null {

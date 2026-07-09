@@ -3,8 +3,13 @@
 import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { CalendarDays, Copy, ExternalLink, LayoutDashboard, Link2, MapPin, Search, Timer, Trophy, Users } from 'lucide-react';
-import { duplicateEventStructureAction, type DuplicateEventStructureInput } from './actions';
+import { CalendarDays, Copy, ExternalLink, LayoutDashboard, Link2, MapPin, Search, Timer, Trash2, Trophy, Users } from 'lucide-react';
+import {
+  deleteEventEditionAction,
+  duplicateEventStructureAction,
+  type DeleteEventEditionInput,
+  type DuplicateEventStructureInput,
+} from './actions';
 import type { ReactNode } from 'react';
 import type { AdminEventListItem } from '@/lib/events-data.ts';
 import type { EventStatus } from '@/lib/types.ts';
@@ -34,6 +39,7 @@ export function EventsListClient({ events }: EventsListClientProps) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<'all' | EventStatus>('all');
   const [duplicatingEvent, setDuplicatingEvent] = useState<AdminEventListItem | null>(null);
+  const [deletingEvent, setDeletingEvent] = useState<AdminEventListItem | null>(null);
 
   const filteredEvents = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -94,7 +100,7 @@ export function EventsListClient({ events }: EventsListClientProps) {
       {filteredEvents.length ? (
         <section className="grid gap-4 xl:grid-cols-2">
           {filteredEvents.map((event) => (
-            <EventCard event={event} key={event.id} onDuplicate={() => setDuplicatingEvent(event)} />
+            <EventCard event={event} key={event.id} onDelete={() => setDeletingEvent(event)} onDuplicate={() => setDuplicatingEvent(event)} />
           ))}
         </section>
       ) : (
@@ -105,11 +111,14 @@ export function EventsListClient({ events }: EventsListClientProps) {
       )}
 
       {duplicatingEvent ? <DuplicateEventDialog event={duplicatingEvent} onClose={() => setDuplicatingEvent(null)} /> : null}
+      {deletingEvent ? <DeleteEventDialog event={deletingEvent} onClose={() => setDeletingEvent(null)} /> : null}
     </div>
   );
 }
 
-function EventCard({ event, onDuplicate }: { event: AdminEventListItem; onDuplicate: () => void }) {
+function EventCard({ event, onDelete, onDuplicate }: { event: AdminEventListItem; onDelete: () => void; onDuplicate: () => void }) {
+  const canDelete = event.status === 'draft' || event.status === 'published';
+
   return (
     <article className="rounded-lg bg-white p-5 shadow-sm ring-1 ring-zinc-100">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
@@ -154,6 +163,24 @@ function EventCard({ event, onDuplicate }: { event: AdminEventListItem; onDuplic
           >
             <Copy className="h-4 w-4" aria-hidden="true" />
             Duplica struttura
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-zinc-100 pt-4">
+        <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+          <p className="text-xs font-semibold text-zinc-400">
+            Eliminazione consentita solo per edizioni draft o published. I dati collegati vengono rimossi.
+          </p>
+          <button
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-red-600 px-3 py-2 text-sm font-black text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500"
+            disabled={!canDelete}
+            onClick={onDelete}
+            title={canDelete ? 'Elimina edizione' : 'Non puoi eliminare edizioni live, completed o archived'}
+            type="button"
+          >
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            Elimina edizione
           </button>
         </div>
       </div>
@@ -255,6 +282,84 @@ function DuplicateEventDialog({ event, onClose }: { event: AdminEventListItem; o
             type="button"
           >
             {isPending ? 'Duplicazione...' : 'Duplica struttura'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function DeleteEventDialog({ event, onClose }: { event: AdminEventListItem; onClose: () => void }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [confirmationSlug, setConfirmationSlug] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const expectedSlug = event.routeId;
+  const canSubmit = confirmationSlug === expectedSlug && (event.status === 'draft' || event.status === 'published');
+
+  function submit() {
+    if (!canSubmit) return;
+
+    const payload: DeleteEventEditionInput = {
+      confirmationSlug,
+      routeEventId: event.routeId,
+    };
+
+    setError(null);
+    startTransition(async () => {
+      const result = await deleteEventEditionAction(payload);
+
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+
+      onClose();
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70 px-4 py-6">
+      <section className="w-full max-w-2xl rounded-lg bg-white p-5 shadow-2xl">
+        <div className="border-b border-red-100 pb-4">
+          <p className="text-sm font-black uppercase tracking-[0.2em] text-red-600">Elimina edizione</p>
+          <h2 className="mt-1 text-3xl font-black">{event.name}</h2>
+          <p className="mt-2 text-sm font-bold text-zinc-600">
+            Questa azione elimina evento e dati collegati. Non puo essere annullata dalla UI.
+          </p>
+        </div>
+
+        {event.status !== 'draft' && event.status !== 'published' ? (
+          <div className="mt-4 rounded-md bg-red-50 p-3 text-sm font-bold text-red-700">
+            Edizione in stato {event.status}: eliminazione non consentita.
+          </div>
+        ) : null}
+
+        {error ? <div className="mt-4 rounded-md bg-red-50 p-3 text-sm font-bold text-red-700">{error}</div> : null}
+
+        <label className="mt-5 block text-sm font-bold">
+          Digita esattamente lo slug per confermare:
+          <code className="ml-2 rounded bg-zinc-100 px-2 py-1 font-mono text-xs">{expectedSlug}</code>
+          <input
+            className="mt-3 w-full rounded-md border border-zinc-300 px-3 py-3 font-mono"
+            onChange={(inputEvent) => setConfirmationSlug(inputEvent.target.value)}
+            placeholder={expectedSlug}
+            value={confirmationSlug}
+          />
+        </label>
+
+        <div className="mt-6 flex flex-col justify-end gap-2 sm:flex-row">
+          <button className="rounded-md bg-zinc-100 px-4 py-3 font-black" onClick={onClose} type="button">
+            Annulla
+          </button>
+          <button
+            className="rounded-md bg-red-600 px-4 py-3 font-black text-white disabled:cursor-not-allowed disabled:bg-zinc-300"
+            disabled={!canSubmit || isPending}
+            onClick={submit}
+            type="button"
+          >
+            {isPending ? 'Eliminazione...' : 'Elimina definitivamente'}
           </button>
         </div>
       </section>

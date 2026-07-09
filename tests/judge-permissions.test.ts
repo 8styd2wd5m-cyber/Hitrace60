@@ -71,7 +71,7 @@ const assignment: JudgeStationAssignment = {
   stationId: 'station-1',
   tokenHash: 'hash',
   active: true,
-  expiresAt: '2026-07-09T09:00:00.000Z',
+  expiresAt: '2026-12-31T09:00:00.000Z',
 };
 
 function submission(overrides: Partial<JudgeScoreSubmission> = {}): JudgeScoreSubmission {

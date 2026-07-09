@@ -2,16 +2,37 @@ import { DISPLAY_LEADERBOARD_SCORE_STATUSES, getRaceStationOrderBySlug } from '.
 import { demoCategories, demoHeats, demoParticipants, demoStations } from './demo-data.ts';
 import { resolveEventIdOrSlug } from './event-id.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
-import type { Category, Heat, Participant, ParticipantStatus, Score, ScoreStatus, Station } from './types.ts';
+import type { Category, EventStatus, Heat, Participant, ParticipantStatus, Score, ScoreStatus, Station } from './types.ts';
 
 export interface DisplayPageData {
   categories: Category[];
+  event: DisplayEvent;
   heats: Heat[];
   participants: Participant[];
   resolvedEventId: string;
   scores: Score[];
   source: 'supabase' | 'demo';
   stations: Station[];
+}
+
+export interface DisplayEvent {
+  id: string;
+  name: string;
+  editionLabel: string | null;
+  location: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  status: EventStatus;
+}
+
+interface EventRow {
+  id: string;
+  name: string;
+  edition_label: string | null;
+  location: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  status: EventStatus;
 }
 
 interface CategoryRow {
@@ -80,6 +101,15 @@ export async function loadDisplayPageData(eventId: string): Promise<DisplayPageD
   if (!hasSupabaseServerConfig()) {
     return {
       categories: demoCategories.filter((category) => category.eventId === eventId),
+      event: {
+        id: eventId,
+        name: 'HITRACE60 Demo Event',
+        editionLabel: 'Giugno 2026 Demo',
+        location: 'Demo Arena',
+        startsAt: '2026-07-07T08:00:00+02:00',
+        endsAt: '2026-07-07T18:00:00+02:00',
+        status: 'live',
+      },
       heats: demoHeats.filter((heat) => heat.eventId === eventId),
       participants: demoParticipants.filter((participant) => participant.eventId === eventId),
       resolvedEventId: eventId,
@@ -96,7 +126,8 @@ export async function loadDisplayPageData(eventId: string): Promise<DisplayPageD
     return emptySupabaseDisplayData(eventId);
   }
 
-  const [categoriesResult, stationsResult, participantsResult, heatsResult, scoresResult] = await Promise.all([
+  const [eventResult, categoriesResult, stationsResult, participantsResult, heatsResult, scoresResult] = await Promise.all([
+    supabase.from('events').select('id,name,edition_label,location,starts_at,ends_at,status').eq('id', resolvedEventId).maybeSingle(),
     supabase.from('categories').select('id,event_id,code,name,type,team_size,race_day,start_order').eq('event_id', resolvedEventId),
     supabase
       .from('stations')
@@ -120,14 +151,15 @@ export async function loadDisplayPageData(eventId: string): Promise<DisplayPageD
   ]);
 
   const firstError =
-    categoriesResult.error ?? stationsResult.error ?? participantsResult.error ?? heatsResult.error ?? scoresResult.error;
+    eventResult.error ?? categoriesResult.error ?? stationsResult.error ?? participantsResult.error ?? heatsResult.error ?? scoresResult.error;
 
-  if (firstError) {
+  if (firstError || !eventResult.data) {
     return emptySupabaseDisplayData(resolvedEventId);
   }
 
   return {
     categories: ((categoriesResult.data ?? []) as CategoryRow[]).map(mapCategory),
+    event: mapEvent(eventResult.data as EventRow),
     heats: ((heatsResult.data ?? []) as HeatRow[]).map(mapHeat),
     participants: ((participantsResult.data ?? []) as ParticipantRow[]).map(mapParticipant),
     resolvedEventId,
@@ -140,12 +172,33 @@ export async function loadDisplayPageData(eventId: string): Promise<DisplayPageD
 function emptySupabaseDisplayData(resolvedEventId: string): DisplayPageData {
   return {
     categories: [],
+    event: {
+      id: resolvedEventId,
+      name: 'HITRACE60',
+      editionLabel: null,
+      location: null,
+      startsAt: null,
+      endsAt: null,
+      status: 'draft',
+    },
     heats: [],
     participants: [],
     resolvedEventId,
     scores: [],
     source: 'supabase',
     stations: [],
+  };
+}
+
+function mapEvent(row: EventRow): DisplayEvent {
+  return {
+    id: row.id,
+    name: row.name,
+    editionLabel: row.edition_label,
+    location: row.location,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    status: row.status,
   };
 }
 

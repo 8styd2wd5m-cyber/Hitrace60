@@ -14,6 +14,7 @@ export default async function DisplayPage({ params }: DisplayPageProps) {
   return (
     <LeaderboardDisplayClient
       categories={data.categories}
+      event={data.event}
       heats={data.heats}
       participants={data.participants}
       resolvedEventId={data.resolvedEventId}

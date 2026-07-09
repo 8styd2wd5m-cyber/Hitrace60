@@ -182,24 +182,17 @@ async function buildDemoJudgeLink(baseUrl: string, station: (typeof demoStations
 }
 
 async function buildMissingJudgeLinks(baseUrl: string, missingReason: string): Promise<JudgeUtilityLink[]> {
-  return Promise.all(
-    HITRACE_SCORE_STATIONS.map(async (station) => {
-      const token = HITRACE_JUDGE_TOKENS_BY_STATION_SLUG[station.slug] ?? '';
-      const url = token ? `${baseUrl}/judge/${token}` : '';
-
-      return {
-        stationId: station.slug,
-        stationName: station.name,
-        stationSlug: station.slug,
-        raceStationOrder: station.raceStationOrder,
-        token,
-        url,
-        ready: false,
-        missingReason,
-        qrDataUrl: token ? await QRCode.toDataURL(url, { margin: 1, width: 180 }) : null,
-      };
-    }),
-  );
+  return HITRACE_SCORE_STATIONS.map((station) => ({
+    stationId: station.slug,
+    stationName: station.name,
+    stationSlug: station.slug,
+    raceStationOrder: station.raceStationOrder,
+    token: '',
+    url: '',
+    ready: false,
+    missingReason,
+    qrDataUrl: null,
+  }));
 }
 
 async function buildSupabaseJudgeLink(
@@ -207,7 +200,7 @@ async function buildSupabaseJudgeLink(
   station: StationRow,
   assignment: AssignmentRow | undefined,
 ): Promise<JudgeUtilityLink> {
-  const token = extractJudgeTokenFromQrUrl(assignment?.qr_url) ?? HITRACE_JUDGE_TOKENS_BY_STATION_SLUG[station.slug] ?? '';
+  const token = extractJudgeTokenFromQrUrl(assignment?.qr_url) ?? '';
   const url = token ? `${baseUrl}/judge/${token}` : '';
   const ready = Boolean(station.active && assignment && token);
 

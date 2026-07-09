@@ -93,7 +93,7 @@ export async function loadDisplayPageData(eventId: string): Promise<DisplayPageD
   const resolvedEventId = await resolveEventIdOrSlug(eventId);
 
   if (!resolvedEventId) {
-    throw new Error(`Evento "${eventId}" non trovato`);
+    return emptySupabaseDisplayData(eventId);
   }
 
   const [categoriesResult, stationsResult, participantsResult, heatsResult, scoresResult] = await Promise.all([
@@ -123,7 +123,7 @@ export async function loadDisplayPageData(eventId: string): Promise<DisplayPageD
     categoriesResult.error ?? stationsResult.error ?? participantsResult.error ?? heatsResult.error ?? scoresResult.error;
 
   if (firstError) {
-    throw new Error(firstError.message);
+    return emptySupabaseDisplayData(resolvedEventId);
   }
 
   return {
@@ -134,6 +134,18 @@ export async function loadDisplayPageData(eventId: string): Promise<DisplayPageD
     scores: ((scoresResult.data ?? []) as ScoreRow[]).map(mapScore),
     source: 'supabase',
     stations: ((stationsResult.data ?? []) as StationRow[]).map(mapStation),
+  };
+}
+
+function emptySupabaseDisplayData(resolvedEventId: string): DisplayPageData {
+  return {
+    categories: [],
+    heats: [],
+    participants: [],
+    resolvedEventId,
+    scores: [],
+    source: 'supabase',
+    stations: [],
   };
 }
 

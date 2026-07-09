@@ -1,5 +1,5 @@
 import QRCode from 'qrcode';
-import { HITRACE_JUDGE_TOKENS_BY_STATION_SLUG, getRaceStationOrderBySlug } from './constants.ts';
+import { HITRACE_JUDGE_TOKENS_BY_STATION_SLUG, HITRACE_SCORE_STATIONS, getRaceStationOrderBySlug } from './constants.ts';
 import { demoStations } from './demo-data.ts';
 import {
   LOCAL_DEMO_EVENT_ALIAS,
@@ -87,7 +87,13 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
   const resolvedEventId = await resolveEventIdOrSlug(routeEventId);
 
   if (!resolvedEventId) {
-    throw new Error(`Evento "${routeEventId}" non trovato`);
+    return {
+      adminLinks,
+      displayLink,
+      judgeLinks: await buildMissingJudgeLinks(baseUrl, `Evento "${routeEventId}" non trovato`),
+      routeEventId,
+      source: 'supabase',
+    };
   }
 
   const supabase = createSupabaseServiceClient();
@@ -104,7 +110,13 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
   const firstError = stationsResult.error ?? assignmentsResult.error;
 
   if (firstError) {
-    throw new Error(firstError.message);
+    return {
+      adminLinks,
+      displayLink,
+      judgeLinks: await buildMissingJudgeLinks(baseUrl, firstError.message),
+      routeEventId,
+      source: 'supabase',
+    };
   }
 
   const assignmentsByStationId = new Map(
@@ -121,7 +133,7 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
   return {
     adminLinks,
     displayLink,
-    judgeLinks,
+    judgeLinks: judgeLinks.length ? judgeLinks : await buildMissingJudgeLinks(baseUrl, 'Stazioni score mancanti nel database'),
     routeEventId,
     source: 'supabase',
   };
@@ -167,6 +179,27 @@ async function buildDemoJudgeLink(baseUrl: string, station: (typeof demoStations
     missingReason: token ? undefined : 'Token demo mancante',
     qrDataUrl: token ? await QRCode.toDataURL(url, { margin: 1, width: 180 }) : null,
   };
+}
+
+async function buildMissingJudgeLinks(baseUrl: string, missingReason: string): Promise<JudgeUtilityLink[]> {
+  return Promise.all(
+    HITRACE_SCORE_STATIONS.map(async (station) => {
+      const token = HITRACE_JUDGE_TOKENS_BY_STATION_SLUG[station.slug] ?? '';
+      const url = token ? `${baseUrl}/judge/${token}` : '';
+
+      return {
+        stationId: station.slug,
+        stationName: station.name,
+        stationSlug: station.slug,
+        raceStationOrder: station.raceStationOrder,
+        token,
+        url,
+        ready: false,
+        missingReason,
+        qrDataUrl: token ? await QRCode.toDataURL(url, { margin: 1, width: 180 }) : null,
+      };
+    }),
+  );
 }
 
 async function buildSupabaseJudgeLink(

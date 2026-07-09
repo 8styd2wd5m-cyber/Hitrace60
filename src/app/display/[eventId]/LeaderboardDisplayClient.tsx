@@ -5,14 +5,17 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { DISPLAY_LEADERBOARD_SCORE_STATUSES } from '@/lib/constants.ts';
 import { calculateLeaderboard } from '@/lib/leaderboard.ts';
+import { createSupabaseBrowserClient, hasSupabaseBrowserConfig } from '@/lib/supabase/client.ts';
 import type { Category, Heat, LeaderboardRow, Participant, Score, Station } from '@/lib/types.ts';
 
 type DisplayMode = 'ranking' | 'stations' | 'multi';
+type RealtimeStatus = 'disabled' | 'connecting' | 'live' | 'error';
 
 interface LeaderboardDisplayClientProps {
   categories: Category[];
   heats: Heat[];
   participants: Participant[];
+  resolvedEventId: string;
   scores: Score[];
   source: 'supabase' | 'demo';
   stations: Station[];
@@ -22,6 +25,7 @@ export function LeaderboardDisplayClient({
   categories,
   heats,
   participants,
+  resolvedEventId,
   scores,
   source,
   stations,
@@ -33,23 +37,54 @@ export function LeaderboardDisplayClient({
   const [selectedCategoryIds, setSelectedCategoryIds] = useState(() => categories.map((category) => category.id));
   const [mode, setMode] = useState<DisplayMode>('ranking');
   const [mounted, setMounted] = useState(false);
-  const [now, setNow] = useState<Date | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>(source === 'supabase' ? 'connecting' : 'disabled');
 
   useEffect(() => {
     setMounted(true);
-    setNow(new Date());
-    const timer = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    if (source !== 'supabase') {
+    setLastUpdatedAt(new Date());
+  }, [scores, heats]);
+
+  useEffect(() => {
+    if (source !== 'supabase' || !hasSupabaseBrowserConfig()) {
+      setRealtimeStatus(source === 'supabase' ? 'error' : 'disabled');
       return;
     }
 
-    const timer = window.setInterval(() => router.refresh(), 5000);
-    return () => window.clearInterval(timer);
-  }, [router, source]);
+    setRealtimeStatus('connecting');
+    const supabase = createSupabaseBrowserClient();
+    const channel = supabase
+      .channel(`display-scores-${resolvedEventId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'scores',
+          filter: `event_id=eq.${resolvedEventId}`,
+        },
+        () => {
+          setLastUpdatedAt(new Date());
+          router.refresh();
+        },
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setRealtimeStatus('live');
+        }
+
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          setRealtimeStatus('error');
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [resolvedEventId, router, source]);
 
   const selectedCategories = categories.filter((category) => selectedCategoryIds.includes(category.id));
   const leaderboards = useMemo(
@@ -98,18 +133,18 @@ export function LeaderboardDisplayClient({
             </div>
             <div className="text-left xl:text-right">
               <p className="text-lg font-bold text-zinc-300">Ultimo aggiornamento</p>
-              {!mounted || !now ? (
+              {!mounted || !lastUpdatedAt ? (
                 <time className="text-3xl font-black tabular-nums" dateTime="" data-testid="display-timestamp">
                   --:--:--
                 </time>
               ) : (
-                <time className="text-3xl font-black tabular-nums" dateTime={now.toISOString()} data-testid="display-timestamp">
-                  {now.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                <time className="text-3xl font-black tabular-nums" dateTime={lastUpdatedAt.toISOString()} data-testid="display-timestamp">
+                  {lastUpdatedAt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                 </time>
               )}
               <p className="mt-1 text-sm font-semibold text-zinc-400">
                 Heat corrente: {currentHeat ? `#${currentHeat.heatNumber}` : 'non impostata'} · score validi: {liveScoresCount} ·{' '}
-                {source === 'supabase' ? 'DB reale' : 'fallback senza score demo'}
+                {source === 'supabase' ? 'DB reale' : 'fallback senza score demo'} · {realtimeLabel(realtimeStatus)}
               </p>
             </div>
           </div>
@@ -172,7 +207,7 @@ export function LeaderboardDisplayClient({
         {mode === 'multi' ? <MultiCategoryMode leaderboards={leaderboards} stations={scoredStations} /> : null}
 
         <footer className="flex items-center justify-between text-sm text-zinc-400">
-          <span>Realtime ready: collegare Supabase Realtime su `scores` per push live.</span>
+          <span>{realtimeFooter(realtimeStatus)}</span>
           <Link className="font-bold text-lime-300" href="/">
             Home
           </Link>
@@ -180,6 +215,20 @@ export function LeaderboardDisplayClient({
       </div>
     </main>
   );
+}
+
+function realtimeLabel(status: RealtimeStatus): string {
+  if (status === 'live') return 'Realtime attivo';
+  if (status === 'connecting') return 'Realtime connessione';
+  if (status === 'error') return 'Realtime non disponibile';
+  return 'Realtime disattivato';
+}
+
+function realtimeFooter(status: RealtimeStatus): string {
+  if (status === 'live') return 'Supabase Realtime attivo su scores.';
+  if (status === 'connecting') return 'Connessione a Supabase Realtime in corso.';
+  if (status === 'error') return 'Realtime non disponibile: il display resta leggibile, ma richiede refresh manuale.';
+  return 'Fallback demo: Realtime non attivo.';
 }
 
 function RankingMode({ category, rows, stations }: { category: Category; rows: LeaderboardRow[]; stations: Station[] }) {

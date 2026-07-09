@@ -16,6 +16,7 @@ export default async function DisplayPage({ params }: DisplayPageProps) {
       categories={data.categories}
       heats={data.heats}
       participants={data.participants}
+      resolvedEventId={data.resolvedEventId}
       scores={data.scores}
       source={data.source}
       stations={data.stations}

@@ -1,0 +1,13 @@
+.next
+node_modules
+.env
+.env.local
+.env.*.local
+dist
+coverage
+*.log
+.pnpm-store
+tsconfig.tsbuildinfo
+.DS_Store
+test-results
+playwright-report

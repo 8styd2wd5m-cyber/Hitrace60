@@ -8,6 +8,7 @@ export interface DisplayPageData {
   categories: Category[];
   heats: Heat[];
   participants: Participant[];
+  resolvedEventId: string;
   scores: Score[];
   source: 'supabase' | 'demo';
   stations: Station[];
@@ -81,6 +82,7 @@ export async function loadDisplayPageData(eventId: string): Promise<DisplayPageD
       categories: demoCategories.filter((category) => category.eventId === eventId),
       heats: demoHeats.filter((heat) => heat.eventId === eventId),
       participants: demoParticipants.filter((participant) => participant.eventId === eventId),
+      resolvedEventId: eventId,
       scores: [],
       source: 'demo',
       stations: demoStations.filter((station) => station.eventId === eventId),
@@ -123,6 +125,7 @@ export async function loadDisplayPageData(eventId: string): Promise<DisplayPageD
     categories: ((categoriesResult.data ?? []) as CategoryRow[]).map(mapCategory),
     heats: ((heatsResult.data ?? []) as HeatRow[]).map(mapHeat),
     participants: ((participantsResult.data ?? []) as ParticipantRow[]).map(mapParticipant),
+    resolvedEventId,
     scores: ((scoresResult.data ?? []) as ScoreRow[]).map(mapScore),
     source: 'supabase',
     stations: ((stationsResult.data ?? []) as StationRow[]).map(mapStation),

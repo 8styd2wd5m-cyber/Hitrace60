@@ -35,8 +35,12 @@ export function TimelineBuilderClient({ eventId, categories, participants, route
   const [categoryStarts, setCategoryStarts] = useState(() =>
     Object.fromEntries(categories.map((category, index) => [category.id, defaultStartForCategory(index)])),
   );
+  const [lastValidCategoryStarts, setLastValidCategoryStarts] = useState(() =>
+    Object.fromEntries(categories.map((category, index) => [category.id, safeDateToISOString(defaultStartForCategory(index)) ?? new Date().toISOString()])),
+  );
 
   const selectedCategories = categories.filter((category) => selectedCategoryIds.includes(category.id));
+  const invalidStartCategories = selectedCategories.filter((category) => !safeDateToISOString(categoryStarts[category.id]));
   const startIntervalSeconds = workIntervalSeconds + stationTransitionSeconds;
   const courseDurationSeconds = totalStations * workIntervalSeconds + (totalStations - 1) * stationTransitionSeconds;
   const generatedByCategory = useMemo(
@@ -48,7 +52,7 @@ export function TimelineBuilderClient({ eventId, categories, participants, route
           categoryId: category.id,
           participants,
           laneCount,
-          startsAt: new Date(categoryStarts[category.id] ?? defaultStartForCategory(0)).toISOString(),
+          startsAt: lastValidCategoryStarts[category.id] ?? safeDateToISOString(defaultStartForCategory(0)) ?? new Date().toISOString(),
           workIntervalSeconds,
           stationTransitionSeconds,
           totalStations,
@@ -56,9 +60,9 @@ export function TimelineBuilderClient({ eventId, categories, participants, route
         }),
       })),
     [
-      categoryStarts,
       eventId,
       laneCount,
+      lastValidCategoryStarts,
       participants,
       pauseAfterCategoryMinutes,
       selectedCategories,
@@ -110,7 +114,7 @@ export function TimelineBuilderClient({ eventId, categories, participants, route
         categoryStarts: Object.fromEntries(
           selectedCategories.map((category) => [
             category.id,
-            new Date(categoryStarts[category.id] ?? defaultStartForCategory(0)).toISOString(),
+            lastValidCategoryStarts[category.id] ?? safeDateToISOString(defaultStartForCategory(0)) ?? new Date().toISOString(),
           ]),
         ),
         laneCount,
@@ -177,16 +181,33 @@ export function TimelineBuilderClient({ eventId, categories, participants, route
             <label className="block text-sm font-bold" key={category.id}>
               {category.name}
               <input
-                className="mt-2 w-full rounded-md border border-zinc-300 px-3 py-3"
-                onChange={(event) =>
+                className={`mt-2 w-full rounded-md border px-3 py-3 ${
+                  safeDateToISOString(categoryStarts[category.id]) ? 'border-zinc-300' : 'border-amber-400 bg-amber-50'
+                }`}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  const nextIso = safeDateToISOString(nextValue);
+
                   setCategoryStarts((currentStarts) => ({
                     ...currentStarts,
-                    [category.id]: event.target.value,
-                  }))
-                }
+                    [category.id]: nextValue,
+                  }));
+
+                  if (nextIso) {
+                    setLastValidCategoryStarts((currentStarts) => ({
+                      ...currentStarts,
+                      [category.id]: nextIso,
+                    }));
+                  }
+                }}
                 type="datetime-local"
                 value={categoryStarts[category.id] ?? defaultStartForCategory(0)}
               />
+              {!safeDateToISOString(categoryStarts[category.id]) ? (
+                <span className="mt-1 block rounded-md bg-amber-100 px-3 py-2 text-xs font-bold text-amber-900">
+                  Data non completa: la preview usa l&apos;ultimo orario valido.
+                </span>
+              ) : null}
             </label>
           ))}
         </div>
@@ -238,12 +259,19 @@ export function TimelineBuilderClient({ eventId, categories, participants, route
           <SummaryCard label="Non assegnati" tone={unassignedParticipants.length ? 'warn' : 'ok'} value={unassignedParticipants.length} />
         </div>
 
+        {invalidStartCategories.length ? (
+          <div className="mt-4 rounded-md bg-amber-100 p-4 font-bold text-amber-900">
+            {invalidStartCategories.length} start categoria incompleti: salvataggio e preview usano l&apos;ultimo valore valido.
+          </div>
+        ) : null}
+
         {overlaps.length ? (
-          <div className="mt-4 rounded-md bg-red-100 p-4 text-red-800" data-testid="timeline-overlap-warning">
-            <strong>{overlaps.length} overlap rilevati.</strong> Una categoria occupa la timeline fino all&apos;ultimo finish piu pausa.
+          <div className="mt-4 rounded-md bg-amber-100 p-4 text-amber-900" data-testid="timeline-overlap-warning">
+            <strong>{overlaps.length} occupazioni categoria sovrapposte.</strong> Informazione non bloccante: HITRACE60 usa partenze
+            scaglionate ogni 4:10. Il conflitto reale su stazione/lane verra gestito con un controllo dedicato.
           </div>
         ) : (
-          <div className="mt-4 rounded-md bg-lime-100 p-4 font-bold text-lime-900">Nessun overlap rilevato.</div>
+          <div className="mt-4 rounded-md bg-lime-100 p-4 font-bold text-lime-900">Nessuna occupazione categoria sovrapposta.</div>
         )}
 
         {unassignedParticipants.length ? (
@@ -448,6 +476,20 @@ function defaultStartForCategory(index: number): string {
 
 function toDateTimeLocalValue(date: Date): string {
   return date.toISOString().slice(0, 16);
+}
+
+function safeDateToISOString(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) {
+    return null;
+  }
+
+  const parsed = Date.parse(value);
+
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }
 
 function formatTime(value: string): string {

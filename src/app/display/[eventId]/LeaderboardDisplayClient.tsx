@@ -49,6 +49,16 @@ export function LeaderboardDisplayClient({
   }, [scores, heats]);
 
   useEffect(() => {
+    setSelectedCategoryIds((currentIds) => {
+      const categoryIds = categories.map((category) => category.id);
+      const categoryIdSet = new Set(categoryIds);
+      const retainedIds = currentIds.filter((categoryId) => categoryIdSet.has(categoryId));
+
+      return retainedIds.length ? retainedIds : categoryIds;
+    });
+  }, [categories]);
+
+  useEffect(() => {
     if (source !== 'supabase' || !hasSupabaseBrowserConfig()) {
       setRealtimeStatus(source === 'supabase' ? 'error' : 'disabled');
       return;
@@ -85,6 +95,19 @@ export function LeaderboardDisplayClient({
       void supabase.removeChannel(channel);
     };
   }, [resolvedEventId, router, source]);
+
+  useEffect(() => {
+    if (source !== 'supabase') {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setLastUpdatedAt(new Date());
+      router.refresh();
+    }, 10000);
+
+    return () => window.clearInterval(interval);
+  }, [router, source]);
 
   const selectedCategories = categories.filter((category) => selectedCategoryIds.includes(category.id));
   const leaderboards = useMemo(

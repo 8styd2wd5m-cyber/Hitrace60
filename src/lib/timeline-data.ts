@@ -1,5 +1,5 @@
 import { demoCategories, demoParticipants } from './demo-data.ts';
-import { resolveSupabaseEventId } from './event-id.ts';
+import { resolveEventIdOrSlug } from './event-id.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
 import type { Category, Participant, ParticipantStatus } from './types.ts';
 
@@ -41,7 +41,12 @@ export async function loadTimelineAdminData(eventId: string): Promise<TimelineAd
     };
   }
 
-  const resolvedEventId = resolveSupabaseEventId(eventId);
+  const resolvedEventId = await resolveEventIdOrSlug(eventId);
+
+  if (!resolvedEventId) {
+    throw new Error(`Evento "${eventId}" non trovato`);
+  }
+
   const supabase = createSupabaseServiceClient();
   const [categoriesResult, participantsResult] = await Promise.all([
     supabase

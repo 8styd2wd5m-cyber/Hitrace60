@@ -1,6 +1,6 @@
 import { DISPLAY_LEADERBOARD_SCORE_STATUSES, getRaceStationOrderBySlug } from './constants.ts';
 import { demoCategories, demoHeats, demoParticipants, demoStations } from './demo-data.ts';
-import { resolveSupabaseEventId } from './event-id.ts';
+import { resolveEventIdOrSlug } from './event-id.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
 import type { Category, Heat, Participant, ParticipantStatus, Score, ScoreStatus, Station } from './types.ts';
 
@@ -90,7 +90,12 @@ export async function loadDisplayPageData(eventId: string): Promise<DisplayPageD
   }
 
   const supabase = createSupabaseServiceClient();
-  const resolvedEventId = resolveSupabaseEventId(eventId);
+  const resolvedEventId = await resolveEventIdOrSlug(eventId);
+
+  if (!resolvedEventId) {
+    throw new Error(`Evento "${eventId}" non trovato`);
+  }
+
   const [categoriesResult, stationsResult, participantsResult, heatsResult, scoresResult] = await Promise.all([
     supabase.from('categories').select('id,event_id,code,name,type,team_size,race_day,start_order').eq('event_id', resolvedEventId),
     supabase

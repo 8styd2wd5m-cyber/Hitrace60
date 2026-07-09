@@ -2,7 +2,7 @@ import { demoCategories, demoHeats, demoParticipants, demoStations } from './dem
 import {
   LOCAL_DEMO_EVENT_ALIAS,
   getAdminEventRedirectForMistakenJudgeToken,
-  isUuid,
+  resolveEventIdOrSlug,
   resolveSupabaseEventId,
 } from './event-id.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
@@ -13,9 +13,11 @@ export interface AdminEventOverview {
   routeId: string;
   name: string;
   location: string | null;
+  editionLabel?: string | null;
   startsAt: string | null;
   endsAt: string | null;
   status: EventStatus;
+  timezone?: string | null;
   source: 'supabase' | 'demo';
   counts: {
     categories: number;
@@ -32,9 +34,11 @@ export interface AdminEventListItem {
   routeId: string;
   name: string;
   location: string | null;
+  editionLabel?: string | null;
   startsAt: string | null;
   endsAt: string | null;
   status: EventStatus;
+  timezone?: string | null;
   source: 'supabase' | 'demo';
 }
 
@@ -55,10 +59,13 @@ export type AdminEventLookupResult =
 interface EventRow {
   id: string;
   name: string;
+  slug?: string | null;
+  edition_label?: string | null;
   location: string | null;
   starts_at: string | null;
   ends_at: string | null;
   status: EventStatus;
+  timezone?: string | null;
 }
 
 export async function listAdminEvents(): Promise<AdminEventListItem[]> {
@@ -68,10 +75,12 @@ export async function listAdminEvents(): Promise<AdminEventListItem[]> {
         id: LOCAL_DEMO_EVENT_ALIAS,
         routeId: LOCAL_DEMO_EVENT_ALIAS,
         name: 'HITRACE60 Demo Event',
+        editionLabel: 'Giugno 2026 Demo',
         location: 'Demo Arena',
         startsAt: '2026-07-07T08:00:00+02:00',
         endsAt: '2026-07-07T18:00:00+02:00',
         status: 'live',
+        timezone: 'Europe/Rome',
         source: 'demo',
       },
     ];
@@ -80,7 +89,7 @@ export async function listAdminEvents(): Promise<AdminEventListItem[]> {
   const supabase = createSupabaseServiceClient();
   const { data, error } = await supabase
     .from('events')
-    .select('id,name,location,starts_at,ends_at,status')
+    .select('id,name,slug,edition_label,location,starts_at,ends_at,status,timezone')
     .order('starts_at', { ascending: false });
 
   if (error) {
@@ -89,12 +98,14 @@ export async function listAdminEvents(): Promise<AdminEventListItem[]> {
 
   return ((data ?? []) as EventRow[]).map((event) => ({
     id: event.id,
-    routeId: event.id === resolveSupabaseEventId(LOCAL_DEMO_EVENT_ALIAS) ? LOCAL_DEMO_EVENT_ALIAS : event.id,
+    routeId: event.slug ?? (event.id === resolveSupabaseEventId(LOCAL_DEMO_EVENT_ALIAS) ? LOCAL_DEMO_EVENT_ALIAS : event.id),
     name: event.name,
+    editionLabel: event.edition_label,
     location: event.location,
     startsAt: event.starts_at,
     endsAt: event.ends_at,
     status: event.status,
+    timezone: event.timezone,
     source: 'supabase',
   }));
 }
@@ -123,10 +134,12 @@ export async function loadAdminEventOverview(routeEventId: string): Promise<Admi
         id: LOCAL_DEMO_EVENT_ALIAS,
         routeId: LOCAL_DEMO_EVENT_ALIAS,
         name: 'HITRACE60 Demo Event',
+        editionLabel: 'Giugno 2026 Demo',
         location: 'Demo Arena',
         startsAt: '2026-07-07T08:00:00+02:00',
         endsAt: '2026-07-07T18:00:00+02:00',
         status: 'live',
+        timezone: 'Europe/Rome',
         source: 'demo',
         counts: {
           categories: demoCategories.length,
@@ -140,19 +153,19 @@ export async function loadAdminEventOverview(routeEventId: string): Promise<Admi
     };
   }
 
-  const resolvedEventId = resolveSupabaseEventId(routeEventId);
+  const resolvedEventId = await resolveEventIdOrSlug(routeEventId);
 
-  if (routeEventId !== LOCAL_DEMO_EVENT_ALIAS && !isUuid(routeEventId)) {
+  if (!resolvedEventId) {
     return {
       status: 'not_found',
-      message: `Evento "${routeEventId}" non trovato. Gli slug saranno abilitati con la migration edizioni.`,
+      message: `Evento "${routeEventId}" non trovato.`,
     };
   }
 
   const supabase = createSupabaseServiceClient();
   const { data: eventRow, error: eventError } = await supabase
     .from('events')
-    .select('id,name,location,starts_at,ends_at,status')
+    .select('id,name,slug,edition_label,location,starts_at,ends_at,status,timezone')
     .eq('id', resolvedEventId)
     .maybeSingle();
 
@@ -181,12 +194,14 @@ export async function loadAdminEventOverview(routeEventId: string): Promise<Admi
     status: 'ready',
     event: {
       id: event.id,
-      routeId: routeEventId,
+      routeId: event.slug ?? routeEventId,
       name: event.name,
+      editionLabel: event.edition_label,
       location: event.location,
       startsAt: event.starts_at,
       endsAt: event.ends_at,
       status: event.status,
+      timezone: event.timezone,
       source: 'supabase',
       counts: {
         categories: categoriesCount,

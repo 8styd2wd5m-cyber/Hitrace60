@@ -4,7 +4,7 @@ import { demoStations } from './demo-data.ts';
 import {
   LOCAL_DEMO_EVENT_ALIAS,
   getAdminEventRedirectForMistakenJudgeToken,
-  resolveSupabaseEventId,
+  resolveEventIdOrSlug,
 } from './event-id.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
 
@@ -84,7 +84,12 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
     };
   }
 
-  const resolvedEventId = resolveSupabaseEventId(routeEventId);
+  const resolvedEventId = await resolveEventIdOrSlug(routeEventId);
+
+  if (!resolvedEventId) {
+    throw new Error(`Evento "${routeEventId}" non trovato`);
+  }
+
   const supabase = createSupabaseServiceClient();
   const [stationsResult, assignmentsResult] = await Promise.all([
     supabase

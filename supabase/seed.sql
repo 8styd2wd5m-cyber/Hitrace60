@@ -39,18 +39,36 @@ insert into profiles (id, full_name)
 values ('00000000-0000-0000-0000-000000000001', 'HITRACE60 Admin')
 on conflict (id) do update set full_name = excluded.full_name;
 
-insert into events (id, name, location, starts_at, ends_at, status, owner_id, public_leaderboard_enabled)
+insert into events (
+  id,
+  name,
+  slug,
+  edition_label,
+  location,
+  starts_at,
+  ends_at,
+  status,
+  owner_id,
+  public_leaderboard_enabled,
+  timezone
+)
 values (
   '10000000-0000-0000-0000-000000000001',
   'HITRACE60 Demo Event',
+  'demo-event',
+  'Giugno 2026 Demo',
   'Demo Arena',
   '2026-07-07T08:00:00+02:00',
   '2026-07-07T18:00:00+02:00',
   'live',
   '00000000-0000-0000-0000-000000000001',
-  true
+  true,
+  'Europe/Rome'
 ) on conflict (id) do update
 set name = excluded.name,
+    slug = excluded.slug,
+    edition_label = excluded.edition_label,
+    timezone = excluded.timezone,
     status = excluded.status,
     public_leaderboard_enabled = excluded.public_leaderboard_enabled;
 

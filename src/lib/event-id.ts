@@ -1,4 +1,5 @@
 import { HITRACE_JUDGE_TOKENS_BY_STATION_SLUG } from './constants.ts';
+import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
 
 export const SEEDED_SUPABASE_DEMO_EVENT_ID = '10000000-0000-0000-0000-000000000001';
 export const LOCAL_DEMO_EVENT_ALIAS = 'demo-event';
@@ -12,6 +13,29 @@ const knownJudgeTokens = new Set<string>([
 
 export function resolveSupabaseEventId(eventId: string): string {
   return eventId === LOCAL_DEMO_EVENT_ALIAS ? SEEDED_SUPABASE_DEMO_EVENT_ID : eventId;
+}
+
+export async function resolveEventIdOrSlug(input: string): Promise<string | null> {
+  if (input === LOCAL_DEMO_EVENT_ALIAS) {
+    return SEEDED_SUPABASE_DEMO_EVENT_ID;
+  }
+
+  if (isUuid(input)) {
+    return input;
+  }
+
+  if (!hasSupabaseServerConfig() || isKnownJudgeToken(input)) {
+    return null;
+  }
+
+  const supabase = createSupabaseServiceClient();
+  const { data, error } = await supabase.from('events').select('id').eq('slug', input).maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data?.id ?? null;
 }
 
 export function isUuid(value: string): boolean {

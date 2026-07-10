@@ -16,6 +16,7 @@ const participantState = vi.hoisted(() => ({
   participantUpserts: [] as unknown[],
   role: 'owner' as 'admin' | 'owner' | 'viewer',
   serviceClientCalls: 0,
+  userClientCalls: 0,
 }));
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
@@ -91,6 +92,13 @@ vi.mock('@/lib/auth/action-auth.ts', () => ({
   }),
 }));
 
+vi.mock('@/lib/supabase/auth-server.ts', () => ({
+  createSupabaseUserServerClient: vi.fn(async () => {
+    participantState.userClientCalls += 1;
+    return createServiceClientMock();
+  }),
+}));
+
 vi.mock('@/lib/supabase/server.ts', () => ({
   createSupabaseServiceClient: vi.fn(() => {
     participantState.serviceClientCalls += 1;
@@ -114,6 +122,7 @@ describe('participants admin actions security', () => {
     participantState.participantUpserts = [];
     participantState.role = 'owner';
     participantState.serviceClientCalls = 0;
+    participantState.userClientCalls = 0;
 
     participantState.categories.set(CATEGORY_ID, categoryRow(CATEGORY_ID, EVENT_ID));
     participantState.categories.set(OTHER_CATEGORY_ID, categoryRow(OTHER_CATEGORY_ID, OTHER_EVENT_ID));
@@ -158,6 +167,8 @@ describe('participants admin actions security', () => {
 
     expect(result.ok).toBe(true);
     expect(participantState.operationCalls).toBe(1);
+    expect(participantState.serviceClientCalls).toBe(0);
+    expect(participantState.userClientCalls).toBe(1);
     expect(participantState.participantUpserts).toHaveLength(1);
     expect(participantState.memberDeleteCalls).toBe(1);
     expect(participantState.memberInsertCalls).toBe(1);
@@ -289,6 +300,8 @@ describe('participants admin actions security', () => {
     const result = await deleteParticipantAction('hitrace60-test', EVENT_ID, PARTICIPANT_ID);
 
     expect(result.ok).toBe(true);
+    expect(participantState.serviceClientCalls).toBe(0);
+    expect(participantState.userClientCalls).toBe(1);
     expect(participantState.deleteCalls).toEqual([
       {
         table: 'participants',

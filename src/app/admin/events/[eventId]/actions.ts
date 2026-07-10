@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { requireEventOperation, requireEventPermissionByRouteId } from '@/lib/auth/action-auth.ts';
 import { getAdminActionErrorMessage } from '@/lib/auth/action-errors.ts';
-import { createSupabaseServiceClient, hasSupabaseServerConfig } from '@/lib/supabase/server.ts';
+import { createSupabaseUserServerClient } from '@/lib/supabase/auth-server.ts';
+import { hasSupabaseServerConfig } from '@/lib/supabase/server.ts';
 import type { EventStatus } from '@/lib/types.ts';
 
 const allowedStatuses = new Set<EventStatus>(['draft', 'published', 'live', 'completed', 'archived']);
@@ -38,7 +39,7 @@ export async function updateEventStatusAction(routeEventId: string, nextStatus: 
   }
 
   const eventId = adminContext.context.event.id;
-  const supabase = createSupabaseServiceClient();
+  const supabase = await createSupabaseUserServerClient();
   const now = new Date().toISOString();
   const { error: updateError } = await supabase
     .from('events')

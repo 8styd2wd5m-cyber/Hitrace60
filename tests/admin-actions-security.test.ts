@@ -13,6 +13,7 @@ const actionState = vi.hoisted(() => ({
   role: 'owner' as 'admin' | 'owner' | 'viewer',
   serviceClientCalls: 0,
   statusUpdate: null as Record<string, unknown> | null,
+  userClientCalls: 0,
 }));
 
 const AUTHORIZED_EVENT_ID = '11111111-1111-4111-8111-111111111111';
@@ -62,6 +63,13 @@ vi.mock('@/lib/auth/action-auth.ts', () => ({
   }),
 }));
 
+vi.mock('@/lib/supabase/auth-server.ts', () => ({
+  createSupabaseUserServerClient: vi.fn(async () => {
+    actionState.userClientCalls += 1;
+    return createServiceClientMock();
+  }),
+}));
+
 vi.mock('@/lib/supabase/server.ts', () => ({
   createSupabaseServiceClient: vi.fn(() => {
     actionState.serviceClientCalls += 1;
@@ -81,6 +89,7 @@ describe('admin P0 actions authorization order', () => {
     actionState.role = 'owner';
     actionState.serviceClientCalls = 0;
     actionState.statusUpdate = null;
+    actionState.userClientCalls = 0;
   });
 
   it('duplicateEventStructureAction non usa service role se auth fallisce', async () => {
@@ -204,6 +213,7 @@ describe('admin P0 actions authorization order', () => {
 
     expect(result.ok).toBe(false);
     expect(actionState.serviceClientCalls).toBe(0);
+    expect(actionState.userClientCalls).toBe(0);
     expect(actionState.statusUpdate).toBeNull();
   });
 
@@ -211,6 +221,8 @@ describe('admin P0 actions authorization order', () => {
     const result = await updateEventStatusAction('source-event', 'published');
 
     expect(result.ok).toBe(true);
+    expect(actionState.serviceClientCalls).toBe(0);
+    expect(actionState.userClientCalls).toBe(1);
     expect(actionState.statusUpdate).toMatchObject({
       status: 'published',
     });

@@ -1,11 +1,13 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireEventOperation, requireEventPermissionByRouteId } from '@/lib/auth/action-auth.ts';
 import { getAdminActionErrorMessage } from '@/lib/auth/action-errors.ts';
 import { isUuid } from '@/lib/event-id.ts';
 import { participantInputSchema, validateParticipantInput, type ParticipantInput } from '@/lib/participants.ts';
-import { createSupabaseServiceClient, hasSupabaseServerConfig } from '@/lib/supabase/server.ts';
+import { createSupabaseUserServerClient } from '@/lib/supabase/auth-server.ts';
+import { hasSupabaseServerConfig } from '@/lib/supabase/server.ts';
 import type { Category, Participant, ParticipantMember, ParticipantStatus } from '@/lib/types.ts';
 
 export type SaveParticipantResult =
@@ -92,7 +94,7 @@ export async function saveParticipantAction(routeEventId: string, input: Partici
     return { ok: false, errors: ['Evento non valido o non coerente.'] };
   }
 
-  const supabase = createSupabaseServiceClient();
+  const supabase = await createSupabaseUserServerClient();
   const { data: categoryRows, error: categoriesError } = await supabase
     .from('categories')
     .select('id,event_id,code,name,type,team_size,race_day,start_order')
@@ -199,7 +201,7 @@ export async function deleteParticipantAction(routeEventId: string, eventId: str
     return { ok: false, errors: ['Evento non valido o non coerente.'] };
   }
 
-  const supabase = createSupabaseServiceClient();
+  const supabase = await createSupabaseUserServerClient();
   const existingParticipant = await loadAuthorizedParticipant(supabase, participantId, eventId);
 
   if (!existingParticipant.ok) {
@@ -266,7 +268,7 @@ type AuthorizedParticipantLookupResult =
     };
 
 async function loadAuthorizedParticipant(
-  supabase: ReturnType<typeof createSupabaseServiceClient>,
+  supabase: SupabaseClient,
   participantId: string,
   eventId: string,
 ): Promise<AuthorizedParticipantLookupResult> {
@@ -297,7 +299,7 @@ async function writeParticipantAuditLog(input: {
   actorUserId: string;
   eventId: string;
   participant: Participant;
-  supabase: ReturnType<typeof createSupabaseServiceClient>;
+  supabase: SupabaseClient;
 }): Promise<void> {
   await input.supabase.from('audit_logs').insert({
     event_id: input.eventId,

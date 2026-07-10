@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { requireEventAdminByRouteId, requireEventOperation } from '@/lib/auth/action-auth.ts';
+import { requireEventOperation, requireEventPermissionByRouteId } from '@/lib/auth/action-auth.ts';
 import { getAdminActionErrorMessage } from '@/lib/auth/action-errors.ts';
 import { isUuid } from '@/lib/event-id.ts';
 import { participantInputSchema, validateParticipantInput, type ParticipantInput } from '@/lib/participants.ts';
@@ -231,7 +231,7 @@ export async function deleteParticipantAction(routeEventId: string, eventId: str
 type AuthorizedParticipantsContextResult =
   | {
       ok: true;
-      context: Awaited<ReturnType<typeof requireEventAdminByRouteId>>;
+      context: Awaited<ReturnType<typeof requireEventPermissionByRouteId>>;
     }
   | {
       ok: false;
@@ -240,7 +240,7 @@ type AuthorizedParticipantsContextResult =
 
 async function getAuthorizedParticipantsContext(routeEventId: string): Promise<AuthorizedParticipantsContextResult> {
   try {
-    const context = await requireEventAdminByRouteId(routeEventId);
+    const context = await requireEventPermissionByRouteId(routeEventId, 'participants.manage');
     requireEventOperation(context, 'manage_participants');
 
     return {

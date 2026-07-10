@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { requireEventAdminByRouteId, requireEventOperation } from '@/lib/auth/action-auth.ts';
+import { requireEventOperation, requireEventPermissionByRouteId } from '@/lib/auth/action-auth.ts';
 import { getAdminActionErrorMessage } from '@/lib/auth/action-errors.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from '@/lib/supabase/server.ts';
 import type { EventStatus } from '@/lib/types.ts';
@@ -81,7 +81,7 @@ export async function updateEventStatusAction(routeEventId: string, nextStatus: 
 type AuthorizedStatusUpdateContextResult =
   | {
       ok: true;
-      context: Awaited<ReturnType<typeof requireEventAdminByRouteId>>;
+      context: Awaited<ReturnType<typeof requireEventPermissionByRouteId>>;
     }
   | {
       ok: false;
@@ -93,7 +93,7 @@ async function getAuthorizedStatusUpdateContext(
   nextStatus: EventStatus,
 ): Promise<AuthorizedStatusUpdateContextResult> {
   try {
-    const context = await requireEventAdminByRouteId(routeEventId);
+    const context = await requireEventPermissionByRouteId(routeEventId, 'event.update_status');
     requireEventOperation(context, 'update_event_status', nextStatus);
 
     return {

@@ -9,6 +9,8 @@ const actionState = vi.hoisted(() => ({
   deleteCalls: [] as Array<{ column: string; table: string; value: string }>,
   eventInsert: null as Record<string, unknown> | null,
   operationError: null as Error | null,
+  permissionCalls: [] as string[],
+  role: 'owner' as 'admin' | 'owner' | 'viewer',
   serviceClientCalls: 0,
   statusUpdate: null as Record<string, unknown> | null,
 }));
@@ -24,9 +26,19 @@ vi.mock('next/cache', () => ({
 vi.mock('@/lib/auth/action-auth.ts', () => ({
   ensureEventOwnerAdmin: vi.fn(async () => undefined),
   ensureProfileForUser: vi.fn(async () => undefined),
-  requireEventAdminByRouteId: vi.fn(async () => {
+  requireEventPermissionByRouteId: vi.fn(async (_routeEventId: string, permission: string) => {
     if (actionState.authError) {
       throw actionState.authError;
+    }
+
+    actionState.permissionCalls.push(permission);
+
+    if (actionState.role === 'viewer') {
+      throw new Error('permission denied');
+    }
+
+    if (actionState.role === 'admin' && permission === 'event.delete') {
+      throw new Error('permission denied');
     }
 
     return {
@@ -36,7 +48,7 @@ vi.mock('@/lib/auth/action-auth.ts', () => ({
         slug: 'source-event',
         status: 'draft' as EventStatus,
       },
-      role: 'owner',
+      role: actionState.role,
       user: {
         email: 'owner@hitrace60.it',
         id: AUTHORIZED_USER_ID,
@@ -65,6 +77,8 @@ describe('admin P0 actions authorization order', () => {
     actionState.deleteCalls = [];
     actionState.eventInsert = null;
     actionState.operationError = null;
+    actionState.permissionCalls = [];
+    actionState.role = 'owner';
     actionState.serviceClientCalls = 0;
     actionState.statusUpdate = null;
   });
@@ -122,6 +136,20 @@ describe('admin P0 actions authorization order', () => {
     expect(actionState.deleteCalls).toHaveLength(0);
   });
 
+  it('deleteEventEditionAction blocca admin perché event.delete è solo owner', async () => {
+    actionState.role = 'admin';
+
+    const result = await deleteEventEditionAction({
+      confirmationSlug: 'source-event',
+      routeEventId: 'source-event',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(actionState.permissionCalls).toEqual(['event.delete']);
+    expect(actionState.serviceClientCalls).toBe(0);
+    expect(actionState.deleteCalls).toHaveLength(0);
+  });
+
   it('deleteEventEditionAction cancella solo dopo authorization e conferma slug corretta', async () => {
     const result = await deleteEventEditionAction({
       confirmationSlug: 'source-event',
@@ -131,6 +159,33 @@ describe('admin P0 actions authorization order', () => {
     expect(result.ok).toBe(true);
     expect(actionState.serviceClientCalls).toBe(1);
     expect(actionState.deleteCalls.some((call) => call.table === 'events' && call.value === AUTHORIZED_EVENT_ID)).toBe(true);
+  });
+
+  it('duplicateEventStructureAction consente admin ma blocca viewer', async () => {
+    actionState.role = 'admin';
+
+    const adminResult = await duplicateEventStructureAction({
+      ...validDuplicateInput(),
+      copyCategories: false,
+      copyJudges: false,
+      copySettings: false,
+      copyStations: false,
+    });
+
+    expect(adminResult.ok).toBe(true);
+    expect(actionState.permissionCalls).toContain('event.duplicate');
+
+    actionState.eventInsert = null;
+    actionState.permissionCalls = [];
+    actionState.role = 'viewer';
+    actionState.serviceClientCalls = 0;
+
+    const viewerResult = await duplicateEventStructureAction(validDuplicateInput());
+
+    expect(viewerResult.ok).toBe(false);
+    expect(actionState.permissionCalls).toEqual(['event.duplicate']);
+    expect(actionState.serviceClientCalls).toBe(0);
+    expect(actionState.eventInsert).toBeNull();
   });
 
   it('updateEventStatusAction non usa service role se auth fallisce', async () => {
@@ -171,6 +226,17 @@ describe('admin P0 actions authorization order', () => {
         status: 'published',
       },
     });
+  });
+
+  it('updateEventStatusAction blocca viewer prima della service role', async () => {
+    actionState.role = 'viewer';
+
+    const result = await updateEventStatusAction('source-event', 'published');
+
+    expect(result.ok).toBe(false);
+    expect(actionState.permissionCalls).toEqual(['event.update_status']);
+    expect(actionState.serviceClientCalls).toBe(0);
+    expect(actionState.statusUpdate).toBeNull();
   });
 });
 

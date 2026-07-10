@@ -11,8 +11,10 @@ const participantState = vi.hoisted(() => ({
   memberDeleteCalls: 0,
   memberInsertCalls: 0,
   operationCalls: 0,
+  permissionCalls: [] as string[],
   participants: new Map<string, ParticipantRowMock>(),
   participantUpserts: [] as unknown[],
+  role: 'owner' as 'admin' | 'owner' | 'viewer',
   serviceClientCalls: 0,
 }));
 
@@ -51,9 +53,15 @@ vi.mock('next/cache', () => ({
 }));
 
 vi.mock('@/lib/auth/action-auth.ts', () => ({
-  requireEventAdminByRouteId: vi.fn(async () => {
+  requireEventPermissionByRouteId: vi.fn(async (_routeEventId: string, permission: string) => {
     if (participantState.authError) {
       throw participantState.authError;
+    }
+
+    participantState.permissionCalls.push(permission);
+
+    if (participantState.role === 'viewer') {
+      throw new Error('permission denied');
     }
 
     return {
@@ -63,7 +71,7 @@ vi.mock('@/lib/auth/action-auth.ts', () => ({
         slug: 'hitrace60-test',
         status: participantState.contextStatus,
       },
-      role: 'owner',
+      role: participantState.role,
       user: {
         email: 'owner@hitrace60.it',
         id: USER_ID,
@@ -101,8 +109,10 @@ describe('participants admin actions security', () => {
     participantState.memberDeleteCalls = 0;
     participantState.memberInsertCalls = 0;
     participantState.operationCalls = 0;
+    participantState.permissionCalls = [];
     participantState.participants.clear();
     participantState.participantUpserts = [];
+    participantState.role = 'owner';
     participantState.serviceClientCalls = 0;
 
     participantState.categories.set(CATEGORY_ID, categoryRow(CATEGORY_ID, EVENT_ID));
@@ -128,6 +138,17 @@ describe('participants admin actions security', () => {
 
     expect(result.ok).toBe(false);
     expect(participantState.serviceClientCalls).toBe(0);
+  });
+
+  it('saveParticipantAction blocca viewer tramite participants.manage prima della service role', async () => {
+    participantState.role = 'viewer';
+
+    const result = await saveParticipantAction('hitrace60-test', validParticipantInput());
+
+    expect(result.ok).toBe(false);
+    expect(participantState.permissionCalls).toEqual(['participants.manage']);
+    expect(participantState.serviceClientCalls).toBe(0);
+    expect(participantState.participantUpserts).toHaveLength(0);
   });
 
   it.each<EventStatus>(['draft', 'published'])('saveParticipantAction consente owner/admin se evento %s', async (status) => {
@@ -239,6 +260,17 @@ describe('participants admin actions security', () => {
     const result = await deleteParticipantAction('hitrace60-test', EVENT_ID, PARTICIPANT_ID);
 
     expect(result.ok).toBe(false);
+    expect(participantState.serviceClientCalls).toBe(0);
+    expect(participantState.deleteCalls).toHaveLength(0);
+  });
+
+  it('deleteParticipantAction blocca viewer tramite participants.manage prima della service role', async () => {
+    participantState.role = 'viewer';
+
+    const result = await deleteParticipantAction('hitrace60-test', EVENT_ID, PARTICIPANT_ID);
+
+    expect(result.ok).toBe(false);
+    expect(participantState.permissionCalls).toEqual(['participants.manage']);
     expect(participantState.serviceClientCalls).toBe(0);
     expect(participantState.deleteCalls).toHaveLength(0);
   });

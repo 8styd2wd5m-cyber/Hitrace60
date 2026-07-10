@@ -11,9 +11,11 @@ const timelineState = vi.hoisted(() => ({
   failStep: null as string | null,
   mutationSteps: [] as string[],
   operationCalls: 0,
+  permissionCalls: [] as string[],
   participants: [] as ParticipantRowMock[],
   returnCrossEventHeats: false,
   returnCrossEventParticipants: false,
+  role: 'owner' as 'admin' | 'owner' | 'viewer',
   serviceClientCalls: 0,
   stations: [] as StationRowMock[],
 }));
@@ -80,9 +82,15 @@ vi.mock('next/cache', () => ({
 }));
 
 vi.mock('@/lib/auth/action-auth.ts', () => ({
-  requireEventAdminByRouteId: vi.fn(async () => {
+  requireEventPermissionByRouteId: vi.fn(async (_routeEventId: string, permission: string) => {
     if (timelineState.authError) {
       throw timelineState.authError;
+    }
+
+    timelineState.permissionCalls.push(permission);
+
+    if (timelineState.role === 'viewer') {
+      throw new Error('permission denied');
     }
 
     return {
@@ -92,7 +100,7 @@ vi.mock('@/lib/auth/action-auth.ts', () => ({
         slug: 'hitrace60-test',
         status: timelineState.contextStatus,
       },
-      role: 'owner',
+      role: timelineState.role,
       user: {
         email: 'owner@hitrace60.it',
         id: USER_ID,
@@ -130,12 +138,14 @@ describe('timeline admin action security', () => {
     timelineState.failStep = null;
     timelineState.mutationSteps = [];
     timelineState.operationCalls = 0;
+    timelineState.permissionCalls = [];
     timelineState.participants = [
       participantRow(PARTICIPANT_A_ID, EVENT_ID, CATEGORY_ID, 1),
       participantRow(PARTICIPANT_B_ID, EVENT_ID, CATEGORY_ID, 2),
     ];
     timelineState.returnCrossEventHeats = false;
     timelineState.returnCrossEventParticipants = false;
+    timelineState.role = 'owner';
     timelineState.serviceClientCalls = 0;
     timelineState.stations = [stationRow(STATION_ID, EVENT_ID)];
   });
@@ -157,6 +167,17 @@ describe('timeline admin action security', () => {
 
     expect(result.ok).toBe(false);
     expect(timelineState.serviceClientCalls).toBe(0);
+  });
+
+  it('blocca viewer tramite timeline.manage prima della service role', async () => {
+    timelineState.role = 'viewer';
+
+    const result = await saveTimelineAction(validInput());
+
+    expect(result.ok).toBe(false);
+    expect(timelineState.permissionCalls).toEqual(['timeline.manage']);
+    expect(timelineState.serviceClientCalls).toBe(0);
+    expect(timelineState.mutationSteps).toHaveLength(0);
   });
 
   it.each<EventStatus>(['draft', 'published'])('consente owner/admin se evento %s', async (status) => {

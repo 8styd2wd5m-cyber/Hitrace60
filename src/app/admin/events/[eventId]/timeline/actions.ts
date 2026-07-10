@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { requireEventAdminByRouteId, requireEventOperation } from '@/lib/auth/action-auth.ts';
+import { requireEventOperation, requireEventPermissionByRouteId } from '@/lib/auth/action-auth.ts';
 import { getAdminActionErrorMessage } from '@/lib/auth/action-errors.ts';
 import { getRaceStationOrderBySlug } from '@/lib/constants.ts';
 import { isUuid } from '@/lib/event-id.ts';
@@ -376,7 +376,7 @@ export async function saveTimelineAction(input: SaveTimelineInput): Promise<Save
 type AuthorizedTimelineContextResult =
   | {
       ok: true;
-      context: Awaited<ReturnType<typeof requireEventAdminByRouteId>>;
+      context: Awaited<ReturnType<typeof requireEventPermissionByRouteId>>;
     }
   | {
       ok: false;
@@ -385,7 +385,7 @@ type AuthorizedTimelineContextResult =
 
 async function getAuthorizedTimelineContext(routeEventId: string): Promise<AuthorizedTimelineContextResult> {
   try {
-    const context = await requireEventAdminByRouteId(routeEventId);
+    const context = await requireEventPermissionByRouteId(routeEventId, 'timeline.manage');
     requireEventOperation(context, 'manage_timeline');
 
     return {

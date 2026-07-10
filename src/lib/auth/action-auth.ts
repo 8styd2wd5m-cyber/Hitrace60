@@ -14,7 +14,55 @@ export type AuthenticatedAdminUser = {
   fullName?: string | null;
 };
 
-export type EventAdminRole = 'owner' | 'admin';
+export type EventRole = 'owner' | 'admin' | 'viewer';
+export type EventAdminRole = Exclude<EventRole, 'viewer'>;
+
+export type EventPermission =
+  | 'admins.manage'
+  | 'event.delete'
+  | 'event.duplicate'
+  | 'event.read'
+  | 'event.update_status'
+  | 'judges.manage'
+  | 'judges.read'
+  | 'participants.manage'
+  | 'participants.read'
+  | 'scores.correct'
+  | 'scores.read'
+  | 'timeline.manage'
+  | 'timeline.read';
+
+export const EVENT_ROLE_PERMISSIONS = {
+  owner: [
+    'admins.manage',
+    'event.delete',
+    'event.duplicate',
+    'event.read',
+    'event.update_status',
+    'judges.manage',
+    'judges.read',
+    'participants.manage',
+    'participants.read',
+    'scores.correct',
+    'scores.read',
+    'timeline.manage',
+    'timeline.read',
+  ],
+  admin: [
+    'event.duplicate',
+    'event.read',
+    'event.update_status',
+    'judges.manage',
+    'judges.read',
+    'participants.manage',
+    'participants.read',
+    'scores.correct',
+    'scores.read',
+    'timeline.manage',
+    'timeline.read',
+  ],
+  viewer: ['event.read', 'judges.read', 'participants.read', 'scores.read', 'timeline.read'],
+} as const satisfies Record<EventRole, readonly EventPermission[]>;
 
 export type EventAdminContext = {
   user: AuthenticatedAdminUser;
@@ -25,6 +73,11 @@ export type EventAdminContext = {
     status: EventStatus;
   };
   role: EventAdminRole;
+};
+
+export type EventPermissionContext = Omit<EventAdminContext, 'role'> & {
+  role: EventRole;
+  permission: EventPermission;
 };
 
 export type AdminEventOperation =
@@ -80,6 +133,51 @@ export async function requireAuthenticatedUser(): Promise<AuthenticatedAdminUser
 }
 
 export async function requireEventAdmin(eventId: string, authenticatedUser?: AuthenticatedAdminUser): Promise<EventAdminContext> {
+  const context = await resolveEventRoleContext(eventId, authenticatedUser);
+
+  if (context.role !== 'owner' && context.role !== 'admin') {
+    throw new AdminActionError('not_authorized');
+  }
+
+  return context as EventAdminContext;
+}
+
+export async function requireEventPermission(
+  eventId: string,
+  permission: EventPermission,
+  authenticatedUser?: AuthenticatedAdminUser,
+): Promise<EventPermissionContext> {
+  const context = await resolveEventRoleContext(eventId, authenticatedUser);
+
+  if (!hasEventPermission(context.role, permission)) {
+    throw new AdminActionError('permission_denied');
+  }
+
+  return {
+    ...context,
+    permission,
+  };
+}
+
+export async function requireEventPermissionByRouteId(
+  routeEventId: string,
+  permission: EventPermission,
+): Promise<EventPermissionContext> {
+  const user = await requireAuthenticatedUser();
+  const eventId = await resolveAuthorizedEventId(routeEventId);
+
+  if (!eventId) {
+    throw new AdminActionError('event_not_found');
+  }
+
+  return await requireEventPermission(eventId, permission, user);
+}
+
+function hasEventPermission(role: EventRole, permission: EventPermission): boolean {
+  return (EVENT_ROLE_PERMISSIONS[role] as readonly EventPermission[]).includes(permission);
+}
+
+async function resolveEventRoleContext(eventId: string, authenticatedUser?: AuthenticatedAdminUser): Promise<Omit<EventPermissionContext, 'permission'>> {
   const user = authenticatedUser ?? (await requireAuthenticatedUser());
 
   if (!isUuid(eventId)) {
@@ -102,16 +200,17 @@ export async function requireEventAdmin(eventId: string, authenticatedUser?: Aut
   }
 
   const event = eventRow as EventAuthorizationRow;
+  const eventContext = {
+    id: event.id,
+    ownerId: event.owner_id,
+    slug: event.slug,
+    status: event.status,
+  };
 
   if (event.owner_id === user.id) {
     return {
       user,
-      event: {
-        id: event.id,
-        ownerId: event.owner_id,
-        slug: event.slug,
-        status: event.status,
-      },
+      event: eventContext,
       role: 'owner',
     };
   }
@@ -129,18 +228,13 @@ export async function requireEventAdmin(eventId: string, authenticatedUser?: Aut
 
   const role = (adminRow as EventAdminRow).role;
 
-  if (role !== 'owner' && role !== 'admin') {
-    throw new AdminActionError('not_authorized');
+  if (role !== 'owner' && role !== 'admin' && role !== 'viewer') {
+    throw new AdminActionError('invalid_role');
   }
 
   return {
     user,
-    event: {
-      id: event.id,
-      ownerId: event.owner_id,
-      slug: event.slug,
-      status: event.status,
-    },
+    event: eventContext,
     role,
   };
 }
@@ -157,7 +251,7 @@ export async function requireEventAdminByRouteId(routeEventId: string): Promise<
 }
 
 export function requireEventOperation(
-  context: EventAdminContext,
+  context: Pick<EventAdminContext, 'event'>,
   operation: AdminEventOperation,
   targetStatus?: EventStatus,
 ): void {

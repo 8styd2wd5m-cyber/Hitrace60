@@ -1,16 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminActionError } from '../src/lib/auth/action-errors.ts';
 import {
+  EVENT_ROLE_PERMISSIONS,
   requireAuthenticatedUser,
   requireEventAdmin,
   requireEventAdminByRouteId,
   requireEventOperation,
+  requireEventPermission,
+  requireEventPermissionByRouteId,
 } from '../src/lib/auth/action-auth.ts';
 import type { EventStatus } from '../src/lib/types.ts';
 
 const testState = vi.hoisted(() => ({
   authConfig: true,
   serviceConfig: true,
+  serviceClientCalls: 0,
   user: null as { email?: string; id: string } | null,
   eventAdmins: new Map<string, { event_id: string; role: string; user_id: string }>(),
   events: new Map<string, { id: string; owner_id: string; slug: string | null; status: EventStatus }>(),
@@ -30,7 +34,10 @@ vi.mock('@/lib/supabase/auth-server.ts', () => ({
 }));
 
 vi.mock('@/lib/supabase/server.ts', () => ({
-  createSupabaseServiceClient: vi.fn(() => createServiceClientMock()),
+  createSupabaseServiceClient: vi.fn(() => {
+    testState.serviceClientCalls += 1;
+    return createServiceClientMock();
+  }),
   hasSupabaseAuthConfig: () => testState.authConfig,
   hasSupabaseServiceConfig: () => testState.serviceConfig,
 }));
@@ -44,6 +51,7 @@ describe('admin action authorization helpers', () => {
   beforeEach(() => {
     testState.authConfig = true;
     testState.serviceConfig = true;
+    testState.serviceClientCalls = 0;
     testState.user = null;
     testState.eventAdmins.clear();
     testState.events.clear();
@@ -81,6 +89,23 @@ describe('admin action authorization helpers', () => {
       email: 'admin@hitrace60.it',
       id: OWNER_ID,
     });
+  });
+
+  it('matrice permessi assegna owner/admin/viewer in modo esplicito', () => {
+    expect(EVENT_ROLE_PERMISSIONS.owner).toContain('event.delete');
+    expect(EVENT_ROLE_PERMISSIONS.owner).toContain('admins.manage');
+    expect(EVENT_ROLE_PERMISSIONS.admin).toContain('participants.manage');
+    expect(EVENT_ROLE_PERMISSIONS.admin).toContain('timeline.manage');
+    expect(EVENT_ROLE_PERMISSIONS.admin).not.toContain('event.delete');
+    expect(EVENT_ROLE_PERMISSIONS.admin).not.toContain('admins.manage');
+    expect(EVENT_ROLE_PERMISSIONS.viewer).toEqual([
+      'event.read',
+      'judges.read',
+      'participants.read',
+      'scores.read',
+      'timeline.read',
+    ]);
+    expect(EVENT_ROLE_PERMISSIONS.viewer).not.toContain('participants.manage');
   });
 
   it('requireEventAdmin accetta owner evento', async () => {
@@ -132,6 +157,79 @@ describe('admin action authorization helpers', () => {
     });
   });
 
+  it('requireEventPermission riconosce viewer ma nega permessi mutativi', async () => {
+    testState.user = {
+      id: ADMIN_ID,
+    };
+    testState.eventAdmins.set(`${EVENT_ID}:${ADMIN_ID}`, {
+      event_id: EVENT_ID,
+      role: 'viewer',
+      user_id: ADMIN_ID,
+    });
+
+    await expect(requireEventPermission(EVENT_ID, 'participants.read')).resolves.toMatchObject({
+      permission: 'participants.read',
+      role: 'viewer',
+      user: {
+        id: ADMIN_ID,
+      },
+    });
+    await expect(requireEventPermission(EVENT_ID, 'participants.manage')).rejects.toMatchObject({
+      code: 'permission_denied',
+    });
+  });
+
+  it('requireEventPermission dà precedenza a events.owner_id rispetto a event_admins', async () => {
+    testState.user = {
+      id: OWNER_ID,
+    };
+    testState.eventAdmins.set(`${EVENT_ID}:${OWNER_ID}`, {
+      event_id: EVENT_ID,
+      role: 'viewer',
+      user_id: OWNER_ID,
+    });
+
+    await expect(requireEventPermission(EVENT_ID, 'event.delete')).resolves.toMatchObject({
+      role: 'owner',
+      user: {
+        id: OWNER_ID,
+      },
+    });
+  });
+
+  it('requireEventPermission accetta admin sui permessi operativi ma non event.delete', async () => {
+    testState.user = {
+      id: ADMIN_ID,
+    };
+    testState.eventAdmins.set(`${EVENT_ID}:${ADMIN_ID}`, {
+      event_id: EVENT_ID,
+      role: 'admin',
+      user_id: ADMIN_ID,
+    });
+
+    await expect(requireEventPermission(EVENT_ID, 'event.duplicate')).resolves.toMatchObject({
+      role: 'admin',
+    });
+    await expect(requireEventPermission(EVENT_ID, 'event.delete')).rejects.toMatchObject({
+      code: 'permission_denied',
+    });
+  });
+
+  it('requireEventPermission rifiuta ruolo non valido', async () => {
+    testState.user = {
+      id: ADMIN_ID,
+    };
+    testState.eventAdmins.set(`${EVENT_ID}:${ADMIN_ID}`, {
+      event_id: EVENT_ID,
+      role: 'super_admin',
+      user_id: ADMIN_ID,
+    });
+
+    await expect(requireEventPermission(EVENT_ID, 'event.read')).rejects.toMatchObject({
+      code: 'invalid_role',
+    });
+  });
+
   it('requireEventAdmin rifiuta utente esterno', async () => {
     testState.user = {
       id: OUTSIDER_ID,
@@ -162,6 +260,29 @@ describe('admin action authorization helpers', () => {
         id: EVENT_ID,
       },
     });
+  });
+
+  it('requireEventPermissionByRouteId risolve slug e verifica permesso', async () => {
+    testState.user = {
+      id: OWNER_ID,
+    };
+
+    await expect(requireEventPermissionByRouteId('hitrace60-test', 'timeline.manage')).resolves.toMatchObject({
+      event: {
+        id: EVENT_ID,
+      },
+      permission: 'timeline.manage',
+      role: 'owner',
+    });
+  });
+
+  it('requireEventPermission non usa service role prima di auth', async () => {
+    testState.user = null;
+
+    await expect(requireEventPermission(EVENT_ID, 'event.read')).rejects.toMatchObject({
+      code: 'not_authenticated',
+    });
+    expect(testState.serviceClientCalls).toBe(0);
   });
 
   it('requireEventOperation consente delete solo su draft e published', () => {

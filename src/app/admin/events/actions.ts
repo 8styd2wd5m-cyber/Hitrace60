@@ -4,8 +4,8 @@ import { revalidatePath } from 'next/cache';
 import {
   ensureEventOwnerAdmin,
   ensureProfileForUser,
-  requireEventAdminByRouteId,
   requireEventOperation,
+  requireEventPermissionByRouteId,
 } from '@/lib/auth/action-auth.ts';
 import { getAdminActionErrorMessage } from '@/lib/auth/action-errors.ts';
 import { hashJudgeToken } from '@/lib/judge-data.ts';
@@ -258,7 +258,7 @@ export async function deleteEventEditionAction(input: DeleteEventEditionInput): 
 type AuthorizedEventContextResult =
   | {
       ok: true;
-      context: Awaited<ReturnType<typeof requireEventAdminByRouteId>>;
+      context: Awaited<ReturnType<typeof requireEventPermissionByRouteId>>;
     }
   | {
       ok: false;
@@ -270,7 +270,8 @@ async function getAuthorizedEventContext(
   operation: Parameters<typeof requireEventOperation>[1],
 ): Promise<AuthorizedEventContextResult> {
   try {
-    const context = await requireEventAdminByRouteId(routeEventId);
+    const permission = operation === 'delete_event' ? 'event.delete' : 'event.duplicate';
+    const context = await requireEventPermissionByRouteId(routeEventId, permission);
     requireEventOperation(context, operation);
 
     return {
@@ -285,7 +286,7 @@ async function getAuthorizedEventContext(
   }
 }
 
-async function ensureDuplicatedEventOwner(user: Awaited<ReturnType<typeof requireEventAdminByRouteId>>['user']): Promise<string | null> {
+async function ensureDuplicatedEventOwner(user: Awaited<ReturnType<typeof requireEventPermissionByRouteId>>['user']): Promise<string | null> {
   try {
     await ensureProfileForUser(user);
     return null;
@@ -296,7 +297,7 @@ async function ensureDuplicatedEventOwner(user: Awaited<ReturnType<typeof requir
 
 async function ensureDuplicatedEventAdmin(
   eventId: string,
-  user: Awaited<ReturnType<typeof requireEventAdminByRouteId>>['user'],
+  user: Awaited<ReturnType<typeof requireEventPermissionByRouteId>>['user'],
 ): Promise<string | null> {
   try {
     await ensureEventOwnerAdmin(eventId, user);

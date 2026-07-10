@@ -1,12 +1,17 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import {
+  ensureEventOwnerAdmin,
+  ensureProfileForUser,
+  requireEventAdminByRouteId,
+  requireEventOperation,
+} from '@/lib/auth/action-auth.ts';
+import { getAdminActionErrorMessage } from '@/lib/auth/action-errors.ts';
 import { hashJudgeToken } from '@/lib/judge-data.ts';
-import { resolveEventIdOrSlug } from '@/lib/event-id.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from '@/lib/supabase/server.ts';
 import type { EventStatus } from '@/lib/types.ts';
 
-const SEEDED_ADMIN_OWNER_ID = '00000000-0000-0000-0000-000000000001';
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export interface DuplicateEventStructureInput {
@@ -119,10 +124,10 @@ export async function duplicateEventStructureAction(
     return { ok: false, error: validationError };
   }
 
-  const sourceEventId = await resolveEventIdOrSlug(input.sourceEventId);
+  const adminContext = await getAuthorizedEventContext(input.sourceEventId, 'duplicate_event');
 
-  if (!sourceEventId) {
-    return { ok: false, error: 'Evento sorgente non trovato.' };
+  if (!adminContext.ok) {
+    return { ok: false, error: adminContext.error };
   }
 
   const supabase = createSupabaseServiceClient();
@@ -143,11 +148,17 @@ export async function duplicateEventStructureAction(
   const { data: sourceEvent, error: sourceEventError } = await supabase
     .from('events')
     .select('id,timezone')
-    .eq('id', sourceEventId)
+    .eq('id', adminContext.context.event.id)
     .maybeSingle();
 
   if (sourceEventError || !sourceEvent) {
     return { ok: false, error: sourceEventError?.message ?? 'Evento sorgente non trovato.' };
+  }
+
+  const profileError = await ensureDuplicatedEventOwner(adminContext.context.user);
+
+  if (profileError) {
+    return { ok: false, error: profileError };
   }
 
   const timezone = (sourceEvent as EventRow).timezone ?? 'Europe/Rome';
@@ -161,10 +172,10 @@ export async function duplicateEventStructureAction(
       starts_at: toNullableTimestamp(input.startsAt),
       ends_at: toNullableTimestamp(input.endsAt),
       status: 'draft' satisfies EventStatus,
-      owner_id: SEEDED_ADMIN_OWNER_ID,
+      owner_id: adminContext.context.user.id,
       public_leaderboard_enabled: true,
       timezone,
-      duplicated_from_event_id: sourceEventId,
+      duplicated_from_event_id: adminContext.context.event.id,
     })
     .select('id,slug')
     .single();
@@ -174,6 +185,13 @@ export async function duplicateEventStructureAction(
   }
 
   const createdEvent = newEvent as { id: string; slug: string | null };
+  const ownerAdminError = await ensureDuplicatedEventAdmin(createdEvent.id, adminContext.context.user);
+
+  if (ownerAdminError) {
+    await supabase.from('events').delete().eq('id', createdEvent.id);
+    return { ok: false, error: ownerAdminError };
+  }
+
   const setupError = await copyStructure({
     copyCategories: input.copyCategories,
     copyJudgeTokens: input.copyJudgeTokens,
@@ -183,7 +201,7 @@ export async function duplicateEventStructureAction(
     newEventId: createdEvent.id,
     raceDay: input.startsAt ? input.startsAt.slice(0, 10) : null,
     newSlug: normalizedSlug,
-    sourceEventId,
+    sourceEventId: adminContext.context.event.id,
   });
 
   if (setupError) {
@@ -207,35 +225,23 @@ export async function deleteEventEditionAction(input: DeleteEventEditionInput): 
     };
   }
 
-  const resolvedEventId = await resolveEventIdOrSlug(input.routeEventId);
-
-  if (!resolvedEventId) {
-    return { ok: false, error: 'Evento non trovato.' };
+  if (!input.routeEventId.trim() || !input.confirmationSlug.trim()) {
+    return { ok: false, error: 'Dati non validi.' };
   }
 
-  const supabase = createSupabaseServiceClient();
-  const { data: eventRow, error: eventError } = await supabase
-    .from('events')
-    .select('id,slug,status,timezone')
-    .eq('id', resolvedEventId)
-    .maybeSingle();
+  const adminContext = await getAuthorizedEventContext(input.routeEventId, 'delete_event');
 
-  if (eventError || !eventRow) {
-    return { ok: false, error: eventError?.message ?? 'Evento non trovato.' };
+  if (!adminContext.ok) {
+    return { ok: false, error: adminContext.error };
   }
 
-  const event = eventRow as EventRow;
-  const expectedSlug = event.slug ?? input.routeEventId;
+  const expectedSlug = adminContext.context.event.slug ?? input.routeEventId;
 
   if (input.confirmationSlug.trim() !== expectedSlug) {
     return { ok: false, error: `Digita esattamente "${expectedSlug}" per eliminare questa edizione.` };
   }
 
-  if (event.status !== 'draft' && event.status !== 'published') {
-    return { ok: false, error: 'Puoi eliminare solo edizioni in stato draft o published.' };
-  }
-
-  const deleteError = await deleteEventGraph(resolvedEventId);
+  const deleteError = await deleteEventGraph(adminContext.context.event.id);
 
   if (deleteError) {
     return { ok: false, error: deleteError };
@@ -245,8 +251,59 @@ export async function deleteEventEditionAction(input: DeleteEventEditionInput): 
 
   return {
     ok: true,
-    deletedEventId: resolvedEventId,
+    deletedEventId: adminContext.context.event.id,
   };
+}
+
+type AuthorizedEventContextResult =
+  | {
+      ok: true;
+      context: Awaited<ReturnType<typeof requireEventAdminByRouteId>>;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+async function getAuthorizedEventContext(
+  routeEventId: string,
+  operation: Parameters<typeof requireEventOperation>[1],
+): Promise<AuthorizedEventContextResult> {
+  try {
+    const context = await requireEventAdminByRouteId(routeEventId);
+    requireEventOperation(context, operation);
+
+    return {
+      ok: true,
+      context,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: getAdminActionErrorMessage(error),
+    };
+  }
+}
+
+async function ensureDuplicatedEventOwner(user: Awaited<ReturnType<typeof requireEventAdminByRouteId>>['user']): Promise<string | null> {
+  try {
+    await ensureProfileForUser(user);
+    return null;
+  } catch (error) {
+    return getAdminActionErrorMessage(error);
+  }
+}
+
+async function ensureDuplicatedEventAdmin(
+  eventId: string,
+  user: Awaited<ReturnType<typeof requireEventAdminByRouteId>>['user'],
+): Promise<string | null> {
+  try {
+    await ensureEventOwnerAdmin(eventId, user);
+    return null;
+  } catch (error) {
+    return getAdminActionErrorMessage(error);
+  }
 }
 
 async function deleteEventGraph(eventId: string): Promise<string | null> {

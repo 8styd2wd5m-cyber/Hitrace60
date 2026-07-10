@@ -1,7 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { resolveEventIdOrSlug } from '@/lib/event-id.ts';
+import { requireEventAdminByRouteId, requireEventOperation } from '@/lib/auth/action-auth.ts';
+import { getAdminActionErrorMessage } from '@/lib/auth/action-errors.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from '@/lib/supabase/server.ts';
 import type { EventStatus } from '@/lib/types.ts';
 
@@ -22,23 +23,22 @@ export async function updateEventStatusAction(routeEventId: string, nextStatus: 
     return { ok: false, message: 'Stato evento non valido.' };
   }
 
-  const eventId = await resolveEventIdOrSlug(routeEventId);
+  const adminContext = await getAuthorizedStatusUpdateContext(routeEventId, nextStatus);
 
-  if (!eventId) {
-    return { ok: false, message: 'Evento non trovato.' };
+  if (!adminContext.ok) {
+    return { ok: false, message: adminContext.message };
   }
 
+  if (adminContext.context.event.status === nextStatus) {
+    return {
+      ok: true,
+      message: `Stato già impostato a ${nextStatus}.`,
+      status: nextStatus,
+    };
+  }
+
+  const eventId = adminContext.context.event.id;
   const supabase = createSupabaseServiceClient();
-  const { data: currentEvent, error: currentError } = await supabase.from('events').select('id,status').eq('id', eventId).maybeSingle();
-
-  if (currentError || !currentEvent) {
-    return { ok: false, message: currentError?.message ?? 'Evento non trovato.' };
-  }
-
-  if ((currentEvent.status as EventStatus) === 'archived' && nextStatus !== 'archived') {
-    return { ok: false, message: 'Edizione archiviata: lo stato non puo essere modificato da UI.' };
-  }
-
   const now = new Date().toISOString();
   const { error: updateError } = await supabase
     .from('events')
@@ -57,8 +57,9 @@ export async function updateEventStatusAction(routeEventId: string, nextStatus: 
     entity_type: 'event',
     entity_id: eventId,
     action: 'updated',
+    actor_user_id: adminContext.context.user.id,
     old_data: {
-      status: currentEvent.status,
+      status: adminContext.context.event.status,
     },
     new_data: {
       status: nextStatus,
@@ -75,4 +76,34 @@ export async function updateEventStatusAction(routeEventId: string, nextStatus: 
     message: `Stato aggiornato a ${nextStatus}.`,
     status: nextStatus,
   };
+}
+
+type AuthorizedStatusUpdateContextResult =
+  | {
+      ok: true;
+      context: Awaited<ReturnType<typeof requireEventAdminByRouteId>>;
+    }
+  | {
+      ok: false;
+      message: string;
+    };
+
+async function getAuthorizedStatusUpdateContext(
+  routeEventId: string,
+  nextStatus: EventStatus,
+): Promise<AuthorizedStatusUpdateContextResult> {
+  try {
+    const context = await requireEventAdminByRouteId(routeEventId);
+    requireEventOperation(context, 'update_event_status', nextStatus);
+
+    return {
+      ok: true,
+      context,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: getAdminActionErrorMessage(error),
+    };
+  }
 }

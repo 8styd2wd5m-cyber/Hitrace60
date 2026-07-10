@@ -30,6 +30,7 @@ export type EventAdminContext = {
 export type AdminEventOperation =
   | 'delete_event'
   | 'duplicate_event'
+  | 'manage_judges'
   | 'manage_participants'
   | 'manage_timeline'
   | 'update_event_status';
@@ -164,7 +165,7 @@ export function requireEventOperation(
     return;
   }
 
-  if (operation === 'delete_event' || operation === 'manage_participants' || operation === 'manage_timeline') {
+  if (operation === 'delete_event' || operation === 'manage_judges' || operation === 'manage_participants' || operation === 'manage_timeline') {
     if (context.event.status === 'draft' || context.event.status === 'published') {
       return;
     }

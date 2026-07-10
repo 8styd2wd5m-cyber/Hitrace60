@@ -180,6 +180,14 @@ describe('admin action authorization helpers', () => {
     expect(() => requireEventOperation(contextWithStatus('archived'), 'manage_participants')).toThrow(AdminActionError);
   });
 
+  it('requireEventOperation consente manage_judges solo su draft e published', () => {
+    expect(() => requireEventOperation(contextWithStatus('draft'), 'manage_judges')).not.toThrow();
+    expect(() => requireEventOperation(contextWithStatus('published'), 'manage_judges')).not.toThrow();
+    expect(() => requireEventOperation(contextWithStatus('live'), 'manage_judges')).toThrow(AdminActionError);
+    expect(() => requireEventOperation(contextWithStatus('completed'), 'manage_judges')).toThrow(AdminActionError);
+    expect(() => requireEventOperation(contextWithStatus('archived'), 'manage_judges')).toThrow(AdminActionError);
+  });
+
   it('requireEventOperation consente manage_timeline solo su draft e published', () => {
     expect(() => requireEventOperation(contextWithStatus('draft'), 'manage_timeline')).not.toThrow();
     expect(() => requireEventOperation(contextWithStatus('published'), 'manage_timeline')).not.toThrow();

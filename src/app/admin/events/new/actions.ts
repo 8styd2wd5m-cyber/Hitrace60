@@ -1,12 +1,15 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
+import { ensureEventOwnerAdmin, ensureProfileForUser, requireAuthenticatedUser } from '@/lib/auth/action-auth.ts';
+import { getAdminActionErrorMessage } from '@/lib/auth/action-errors.ts';
 import { HITRACE_CATEGORY_DEFINITIONS, HITRACE_SCORE_STATIONS } from '@/lib/constants.ts';
 import { hashJudgeToken } from '@/lib/judge-data.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from '@/lib/supabase/server.ts';
 import type { EventStatus } from '@/lib/types.ts';
 
-const SEEDED_ADMIN_OWNER_ID = '00000000-0000-0000-0000-000000000001';
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const allowedTimeZones = new Set(Intl.supportedValuesOf?.('timeZone') ?? ['Europe/Rome']);
 
 export interface CreateEventEditionInput {
   createJudges: boolean;
@@ -50,6 +53,24 @@ export async function createEventEditionAction(input: CreateEventEditionInput): 
   }
 
   const normalizedSlug = input.slug.trim().toLowerCase();
+  const minimumValidationError = validateMinimumInput({ ...input, slug: normalizedSlug });
+
+  if (minimumValidationError) {
+    return {
+      ok: false,
+      error: minimumValidationError,
+    };
+  }
+
+  const authResult = await getAuthenticatedEditionCreator();
+
+  if (!authResult.ok) {
+    return {
+      ok: false,
+      error: authResult.error,
+    };
+  }
+
   const validationError = validateInput({ ...input, slug: normalizedSlug });
 
   if (validationError) {
@@ -69,7 +90,7 @@ export async function createEventEditionAction(input: CreateEventEditionInput): 
   if (slugError) {
     return {
       ok: false,
-      error: slugError.message,
+      error: 'Verifica slug non riuscita.',
     };
   }
 
@@ -90,7 +111,7 @@ export async function createEventEditionAction(input: CreateEventEditionInput): 
       starts_at: toNullableTimestamp(input.startsAt),
       ends_at: toNullableTimestamp(input.endsAt),
       status: 'draft' satisfies EventStatus,
-      owner_id: SEEDED_ADMIN_OWNER_ID,
+      owner_id: authResult.user.id,
       public_leaderboard_enabled: true,
       timezone: input.timezone.trim() || 'Europe/Rome',
     })
@@ -100,11 +121,22 @@ export async function createEventEditionAction(input: CreateEventEditionInput): 
   if (eventError || !eventRow) {
     return {
       ok: false,
-      error: eventError?.message ?? 'Creazione evento non riuscita.',
+      error: 'Creazione evento non riuscita.',
     };
   }
 
   const event = eventRow as EventInsertResult;
+  const ownerAdminError = await ensureEditionOwnerAdmin(event.id, authResult.user);
+
+  if (ownerAdminError) {
+    await cleanupCreatedEvent(supabase, event.id);
+
+    return {
+      ok: false,
+      error: ownerAdminError,
+    };
+  }
+
   const setupError = await createEditionStructure({
     createJudges: input.createJudges,
     defaultLaneCount: input.defaultLaneCount,
@@ -112,10 +144,10 @@ export async function createEventEditionAction(input: CreateEventEditionInput): 
     raceDay: input.startsAt ? input.startsAt.slice(0, 10) : null,
     slug: normalizedSlug,
     timezone: input.timezone.trim() || 'Europe/Rome',
-  });
+  }, supabase);
 
   if (setupError) {
-    await supabase.from('events').delete().eq('id', event.id);
+    await cleanupCreatedEvent(supabase, event.id);
 
     return {
       ok: false,
@@ -123,23 +155,69 @@ export async function createEventEditionAction(input: CreateEventEditionInput): 
     };
   }
 
+  await writeEventCreatedAuditLog({
+    actorUserId: authResult.user.id,
+    editionLabel: input.editionLabel.trim(),
+    eventId: event.id,
+    slug: normalizedSlug,
+    supabase,
+  });
+
+  revalidatePath('/admin/events');
+
   return {
     ok: true,
     redirectTo: `/admin/events/${event.slug ?? event.id}`,
   };
 }
 
-function validateInput(input: CreateEventEditionInput): string | null {
+function validateMinimumInput(input: CreateEventEditionInput): string | null {
   if (!input.name.trim()) {
     return 'Il nome evento è obbligatorio.';
+  }
+
+  if (!input.editionLabel.trim()) {
+    return 'Edition label obbligatoria.';
+  }
+
+  if (!input.slug.trim()) {
+    return 'Slug obbligatorio.';
   }
 
   if (!slugPattern.test(input.slug)) {
     return 'Slug non valido: usa solo lettere minuscole, numeri e trattini.';
   }
 
+  if (input.slug.length > 80 || input.slug.includes('/') || input.slug.includes('..')) {
+    return 'Slug non valido: usa solo lettere minuscole, numeri e trattini.';
+  }
+
+  return null;
+}
+
+function validateInput(input: CreateEventEditionInput): string | null {
+  const minimumError = validateMinimumInput(input);
+
+  if (minimumError) {
+    return minimumError;
+  }
+
+  if (hasForbiddenClientFields(input)) {
+    return 'Dati evento non validi.';
+  }
+
   if (input.defaultLaneCount < 1 || input.defaultLaneCount > 40) {
     return 'Il numero lane deve essere compreso tra 1 e 40.';
+  }
+
+  if (!Number.isInteger(input.defaultLaneCount)) {
+    return 'Il numero lane deve essere un intero.';
+  }
+
+  const timezone = input.timezone.trim() || 'Europe/Rome';
+
+  if (!isValidTimeZone(timezone)) {
+    return 'Timezone non valida.';
   }
 
   if (input.startsAt && input.endsAt && Date.parse(input.endsAt) <= Date.parse(input.startsAt)) {
@@ -153,6 +231,42 @@ function validateInput(input: CreateEventEditionInput): string | null {
   return null;
 }
 
+type AuthenticatedEditionCreatorResult =
+  | {
+      ok: true;
+      user: Awaited<ReturnType<typeof requireAuthenticatedUser>>;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+async function getAuthenticatedEditionCreator(): Promise<AuthenticatedEditionCreatorResult> {
+  try {
+    const user = await requireAuthenticatedUser();
+    await ensureProfileForUser(user);
+
+    return {
+      ok: true,
+      user,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: getAdminActionErrorMessage(error),
+    };
+  }
+}
+
+async function ensureEditionOwnerAdmin(eventId: string, user: Awaited<ReturnType<typeof requireAuthenticatedUser>>): Promise<string | null> {
+  try {
+    await ensureEventOwnerAdmin(eventId, user);
+    return null;
+  } catch (error) {
+    return getAdminActionErrorMessage(error);
+  }
+}
+
 async function createEditionStructure(input: {
   createJudges: boolean;
   defaultLaneCount: number;
@@ -160,9 +274,7 @@ async function createEditionStructure(input: {
   raceDay: string | null;
   slug: string;
   timezone: string;
-}): Promise<string | null> {
-  const supabase = createSupabaseServiceClient();
-
+}, supabase: ReturnType<typeof createSupabaseServiceClient>): Promise<string | null> {
   const { error: settingsError } = await supabase.from('event_settings').insert({
     event_id: input.eventId,
     default_lane_count: input.defaultLaneCount,
@@ -172,7 +284,7 @@ async function createEditionStructure(input: {
   });
 
   if (settingsError) {
-    return settingsError.message;
+    return 'Creazione settings evento non riuscita.';
   }
 
   const { error: categoriesError } = await supabase.from('categories').insert(
@@ -188,7 +300,7 @@ async function createEditionStructure(input: {
   );
 
   if (categoriesError) {
-    return categoriesError.message;
+    return 'Creazione categorie standard non riuscita.';
   }
 
   const { data: stationRows, error: stationsError } = await supabase
@@ -209,11 +321,11 @@ async function createEditionStructure(input: {
     .select('id,name,slug');
 
   if (stationsError || !stationRows) {
-    return stationsError?.message ?? 'Creazione stazioni non riuscita.';
+    return 'Creazione stazioni non riuscita.';
   }
 
   if (input.createJudges) {
-    const judgesError = await createStationJudges(input.eventId, input.slug, stationRows as StationInsertResult[]);
+    const judgesError = await createStationJudges(input.eventId, input.slug, stationRows as StationInsertResult[], supabase);
 
     if (judgesError) {
       return judgesError;
@@ -223,9 +335,12 @@ async function createEditionStructure(input: {
   return null;
 }
 
-async function createStationJudges(eventId: string, eventSlug: string, stations: StationInsertResult[]): Promise<string | null> {
-  const supabase = createSupabaseServiceClient();
-
+async function createStationJudges(
+  eventId: string,
+  eventSlug: string,
+  stations: StationInsertResult[],
+  supabase: ReturnType<typeof createSupabaseServiceClient>,
+): Promise<string | null> {
   for (const station of stations) {
     const token = `judge-${station.slug}-${eventSlug}-token`;
     const { data: judgeRow, error: judgeError } = await supabase
@@ -239,7 +354,7 @@ async function createStationJudges(eventId: string, eventSlug: string, stations:
       .single();
 
     if (judgeError || !judgeRow) {
-      return judgeError?.message ?? `Creazione giudice ${station.name} non riuscita.`;
+      return `Creazione giudice ${station.name} non riuscita.`;
     }
 
     const { error: assignmentError } = await supabase.from('judge_station_assignments').insert({
@@ -252,11 +367,58 @@ async function createStationJudges(eventId: string, eventSlug: string, stations:
     });
 
     if (assignmentError) {
-      return assignmentError.message;
+      return `Creazione assignment giudice ${station.name} non riuscita.`;
     }
   }
 
   return null;
+}
+
+async function writeEventCreatedAuditLog(input: {
+  actorUserId: string;
+  editionLabel: string;
+  eventId: string;
+  slug: string;
+  supabase: ReturnType<typeof createSupabaseServiceClient>;
+}): Promise<void> {
+  await input.supabase.from('audit_logs').insert({
+    event_id: input.eventId,
+    entity_type: 'event',
+    entity_id: input.eventId,
+    action: 'created',
+    actor_user_id: input.actorUserId,
+    new_data: {
+      edition_label: input.editionLabel,
+      slug: input.slug,
+      status: 'draft',
+    },
+    reason: 'Creazione nuova edizione da area admin',
+  });
+}
+
+async function cleanupCreatedEvent(supabase: ReturnType<typeof createSupabaseServiceClient>, eventId: string): Promise<void> {
+  await supabase.from('events').delete().eq('id', eventId);
+}
+
+function hasForbiddenClientFields(input: CreateEventEditionInput): boolean {
+  const unsafeInput = input as CreateEventEditionInput & {
+    ownerId?: unknown;
+    owner_id?: unknown;
+    status?: unknown;
+  };
+
+  return unsafeInput.ownerId !== undefined || unsafeInput.owner_id !== undefined || unsafeInput.status !== undefined;
+}
+
+function isValidTimeZone(timezone: string): boolean {
+  if (allowedTimeZones.has(timezone)) return true;
+
+  try {
+    new Intl.DateTimeFormat('it-IT', { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function toNullableTimestamp(value: string): string | null {

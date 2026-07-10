@@ -11,6 +11,7 @@ import { AdminActionError } from './action-errors.ts';
 export type AuthenticatedAdminUser = {
   id: string;
   email: string | null;
+  fullName?: string | null;
 };
 
 export type EventAdminRole = 'owner' | 'admin';
@@ -67,9 +68,13 @@ export async function requireAuthenticatedUser(): Promise<AuthenticatedAdminUser
     throw new AdminActionError('not_authenticated');
   }
 
+  const userMetadata = user.user_metadata as Record<string, unknown> | undefined;
+  const metadataFullName = getNonEmptyString(userMetadata?.full_name) ?? getNonEmptyString(userMetadata?.name);
+
   return {
     id: user.id,
     email: user.email ?? null,
+    ...(metadataFullName ? { fullName: metadataFullName } : {}),
   };
 }
 
@@ -188,24 +193,55 @@ export async function ensureProfileForUser(user: AuthenticatedAdminUser): Promis
   }
 
   const supabase = createSupabaseServiceClient();
-  const { data: existingProfile, error: profileError } = await supabase.from('profiles').select('id').eq('id', user.id).maybeSingle();
+  const { data: existingProfile, error: profileError } = await supabase.from('profiles').select('id,full_name').eq('id', user.id).maybeSingle();
 
   if (profileError) {
     throw new AdminActionError('not_authorized');
   }
 
   if (existingProfile) {
+    if (getNonEmptyString((existingProfile as { full_name?: string | null }).full_name)) {
+      return;
+    }
+
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update({
+        full_name: getProfileFullName(user),
+      })
+      .eq('id', user.id);
+
+    if (updateError) {
+      throw new AdminActionError('not_authorized');
+    }
+
     return;
   }
 
   const { error: insertError } = await supabase.from('profiles').insert({
     id: user.id,
-    full_name: user.email ?? 'HITRACE60 Admin',
+    full_name: getProfileFullName(user),
   });
 
   if (insertError) {
     throw new AdminActionError('not_authorized');
   }
+}
+
+function getProfileFullName(user: AuthenticatedAdminUser): string {
+  const metadataName = getNonEmptyString(user.fullName);
+
+  if (metadataName) return metadataName;
+
+  const emailLocalPart = getNonEmptyString(user.email?.split('@')[0]);
+
+  if (emailLocalPart) return emailLocalPart;
+
+  return 'Admin HITRACE60';
+}
+
+function getNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 export async function ensureEventOwnerAdmin(eventId: string, user: AuthenticatedAdminUser): Promise<void> {

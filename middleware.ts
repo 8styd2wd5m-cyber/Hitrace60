@@ -21,11 +21,7 @@ export async function middleware(request: NextRequest) {
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !anonKey) {
-    if (process.env.NODE_ENV !== 'production') {
-      return NextResponse.next();
-    }
-
-    return redirectToLogin(request, pathname);
+    return isAdminRoute ? redirectToLogin(request, `${pathname}${request.nextUrl.search}`, 'auth_config_missing') : NextResponse.next();
   }
 
   let response = NextResponse.next({
@@ -62,12 +58,15 @@ export async function middleware(request: NextRequest) {
   return response;
 }
 
-function redirectToLogin(request: NextRequest, redirectTo: string) {
+function redirectToLogin(request: NextRequest, redirectTo: string, error?: string) {
   const loginUrl = new URL('/login', request.url);
   loginUrl.searchParams.set('redirectTo', sanitizeAdminRedirect(redirectTo));
+  if (error) {
+    loginUrl.searchParams.set('error', error);
+  }
   return NextResponse.redirect(loginUrl);
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/login'],
+  matcher: ['/admin', '/admin/:path*', '/login'],
 };

@@ -7,12 +7,13 @@ import { hasSupabaseAuthConfig } from '@/lib/supabase/server.ts';
 
 interface LoginPageProps {
   searchParams: Promise<{
+    error?: string;
     redirectTo?: string;
   }>;
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
-  const { redirectTo: rawRedirectTo } = await searchParams;
+  const { error, redirectTo: rawRedirectTo } = await searchParams;
   const redirectTo = sanitizeAdminRedirect(rawRedirectTo);
 
   if (hasSupabaseAuthConfig()) {
@@ -35,7 +36,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           Inserisci le credenziali Supabase Auth per gestire edizioni, timeline, partecipanti e link gara.
         </p>
 
-        {!hasSupabaseAuthConfig() ? (
+        {!hasSupabaseAuthConfig() || error === 'auth_config_missing' ? (
           <div className="mt-5 rounded-md bg-amber-50 p-3 text-sm font-bold text-amber-900">
             Supabase Auth non e configurato. In development puoi ancora usare il fallback demo, ma in produzione l&apos;admin resta
             bloccato.

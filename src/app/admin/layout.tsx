@@ -1,10 +1,11 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { logoutAdminAction } from './actions';
 import { createSupabaseUserServerClient } from '@/lib/supabase/auth-server.ts';
 import { hasSupabaseAuthConfig } from '@/lib/supabase/server.ts';
 
 export default async function AdminLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const email = await loadSessionEmail();
+  const email = await requireAdminSessionEmail();
 
   return (
     <>
@@ -15,7 +16,7 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
               HITRACE60 Admin
             </Link>
             <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-black text-zinc-600">
-              {email ? `Sessione: ${email}` : 'Development fallback'}
+              Sessione: {email}
             </span>
           </div>
           <form action={logoutAdminAction}>
@@ -30,9 +31,9 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
   );
 }
 
-async function loadSessionEmail(): Promise<string | null> {
+async function requireAdminSessionEmail(): Promise<string> {
   if (!hasSupabaseAuthConfig()) {
-    return null;
+    redirect('/login?error=auth_config_missing');
   }
 
   const supabase = await createSupabaseUserServerClient();
@@ -40,5 +41,9 @@ async function loadSessionEmail(): Promise<string | null> {
     data: { user },
   } = await supabase.auth.getUser();
 
-  return user?.email ?? null;
+  if (!user) {
+    redirect('/login');
+  }
+
+  return user.email ?? 'admin autenticato';
 }

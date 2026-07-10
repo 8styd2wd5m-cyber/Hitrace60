@@ -180,6 +180,14 @@ describe('admin action authorization helpers', () => {
     expect(() => requireEventOperation(contextWithStatus('archived'), 'manage_participants')).toThrow(AdminActionError);
   });
 
+  it('requireEventOperation consente manage_timeline solo su draft e published', () => {
+    expect(() => requireEventOperation(contextWithStatus('draft'), 'manage_timeline')).not.toThrow();
+    expect(() => requireEventOperation(contextWithStatus('published'), 'manage_timeline')).not.toThrow();
+    expect(() => requireEventOperation(contextWithStatus('live'), 'manage_timeline')).toThrow(AdminActionError);
+    expect(() => requireEventOperation(contextWithStatus('completed'), 'manage_timeline')).toThrow(AdminActionError);
+    expect(() => requireEventOperation(contextWithStatus('archived'), 'manage_timeline')).toThrow(AdminActionError);
+  });
+
   it('requireEventOperation applica transizioni stato esplicite', () => {
     expect(() => requireEventOperation(contextWithStatus('draft'), 'update_event_status', 'published')).not.toThrow();
     expect(() => requireEventOperation(contextWithStatus('published'), 'update_event_status', 'live')).not.toThrow();

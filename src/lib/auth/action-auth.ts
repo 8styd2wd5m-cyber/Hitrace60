@@ -26,7 +26,7 @@ export type EventAdminContext = {
   role: EventAdminRole;
 };
 
-export type AdminEventOperation = 'delete_event' | 'duplicate_event' | 'update_event_status';
+export type AdminEventOperation = 'delete_event' | 'duplicate_event' | 'manage_participants' | 'update_event_status';
 
 type EventAuthorizationRow = {
   id: string;
@@ -154,7 +154,7 @@ export function requireEventOperation(
     return;
   }
 
-  if (operation === 'delete_event') {
+  if (operation === 'delete_event' || operation === 'manage_participants') {
     if (context.event.status === 'draft' || context.event.status === 'published') {
       return;
     }

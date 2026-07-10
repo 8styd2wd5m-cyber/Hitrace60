@@ -1,9 +1,10 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { assertOperationalWriteAllowed } from '@/lib/event-status.ts';
+import { requireEventAdminByRouteId, requireEventOperation } from '@/lib/auth/action-auth.ts';
+import { getAdminActionErrorMessage } from '@/lib/auth/action-errors.ts';
+import { isUuid } from '@/lib/event-id.ts';
 import { participantInputSchema, validateParticipantInput, type ParticipantInput } from '@/lib/participants.ts';
-import { resolveEventIdOrSlug } from '@/lib/event-id.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from '@/lib/supabase/server.ts';
 import type { Category, Participant, ParticipantMember, ParticipantStatus } from '@/lib/types.ts';
 
@@ -69,37 +70,62 @@ export async function saveParticipantAction(routeEventId: string, input: Partici
     return { ok: false, errors: parsed.error.issues.map((issue) => issue.message) };
   }
 
-  const resolvedEventId = await resolveEventIdOrSlug(routeEventId);
-
-  if (!resolvedEventId || resolvedEventId !== input.eventId) {
-    return { ok: false, errors: ['Evento non valido o non coerente.'] };
+  if (!routeEventId.trim() || !isUuid(input.eventId) || !isUuid(input.categoryId) || (input.id && !isUuid(input.id))) {
+    return { ok: false, errors: ['Dati partecipante non validi.'] };
   }
 
-  const statusError = await assertOperationalWriteAllowed(resolvedEventId);
+  const duplicateMemberError = getDuplicateMemberError(input);
 
-  if (statusError) {
-    return { ok: false, errors: [statusError] };
+  if (duplicateMemberError) {
+    return { ok: false, errors: [duplicateMemberError] };
+  }
+
+  const adminContext = await getAuthorizedParticipantsContext(routeEventId);
+
+  if (!adminContext.ok) {
+    return { ok: false, errors: [adminContext.error] };
+  }
+
+  const eventId = adminContext.context.event.id;
+
+  if (eventId !== input.eventId) {
+    return { ok: false, errors: ['Evento non valido o non coerente.'] };
   }
 
   const supabase = createSupabaseServiceClient();
   const { data: categoryRows, error: categoriesError } = await supabase
     .from('categories')
     .select('id,event_id,code,name,type,team_size,race_day,start_order')
-    .eq('event_id', resolvedEventId);
+    .eq('event_id', eventId);
 
   if (categoriesError) {
-    return { ok: false, errors: [categoriesError.message] };
+    return { ok: false, errors: ['Categoria non valida.'] };
   }
 
   const categories = ((categoryRows ?? []) as CategoryRow[]).map(mapCategory);
+  const selectedCategory = categories.find((category) => category.id === input.categoryId);
+
+  if (!selectedCategory || selectedCategory.eventId !== eventId) {
+    return { ok: false, errors: ['Categoria non valida.'] };
+  }
+
+  if (input.id) {
+    const existingParticipant = await loadAuthorizedParticipant(supabase, input.id, eventId);
+
+    if (!existingParticipant.ok) {
+      return { ok: false, errors: [existingParticipant.error] };
+    }
+  }
+
   const validation = validateParticipantInput(input, categories);
 
   if (!validation.valid) {
     return { ok: false, errors: validation.errors };
   }
 
+  const isUpdate = Boolean(input.id);
   const participantRow = {
-    event_id: resolvedEventId,
+    event_id: eventId,
     category_id: input.categoryId,
     display_name: input.displayName.trim(),
     bib_number: input.bibNumber?.trim() || null,
@@ -107,18 +133,18 @@ export async function saveParticipantAction(routeEventId: string, input: Partici
     seed_order: input.seedOrder,
   };
   const result = input.id
-    ? await supabase.from('participants').update(participantRow).eq('id', input.id).eq('event_id', resolvedEventId).select().single()
+    ? await supabase.from('participants').update(participantRow).eq('id', input.id).eq('event_id', eventId).select().single()
     : await supabase.from('participants').insert(participantRow).select().single();
 
   if (result.error || !result.data) {
-    return { ok: false, errors: [result.error?.message ?? 'Salvataggio partecipante non riuscito.'] };
+    return { ok: false, errors: ['Salvataggio partecipante non riuscito.'] };
   }
 
   const participant = mapParticipant(result.data as ParticipantRow);
   const { error: deleteMembersError } = await supabase.from('participant_members').delete().eq('participant_id', participant.id);
 
   if (deleteMembersError) {
-    return { ok: false, errors: [deleteMembersError.message] };
+    return { ok: false, errors: ['Aggiornamento membri non riuscito.'] };
   }
 
   const memberRows = input.members.map((member, index) => ({
@@ -134,8 +160,16 @@ export async function saveParticipantAction(routeEventId: string, input: Partici
     .select('id,participant_id,first_name,last_name,gender,member_order');
 
   if (membersError) {
-    return { ok: false, errors: [membersError.message] };
+    return { ok: false, errors: ['Salvataggio membri non riuscito.'] };
   }
+
+  await writeParticipantAuditLog({
+    action: isUpdate ? 'updated' : 'created',
+    actorUserId: adminContext.context.user.id,
+    eventId,
+    participant,
+    supabase,
+  });
 
   revalidateAdminEventPaths(routeEventId);
 
@@ -151,24 +185,40 @@ export async function deleteParticipantAction(routeEventId: string, eventId: str
     return { ok: false, errors: ['Supabase non configurato.'] };
   }
 
-  const resolvedEventId = await resolveEventIdOrSlug(routeEventId);
+  if (!routeEventId.trim() || !isUuid(eventId) || !isUuid(participantId)) {
+    return { ok: false, errors: ['Dati partecipante non validi.'] };
+  }
 
-  if (!resolvedEventId || resolvedEventId !== eventId) {
+  const adminContext = await getAuthorizedParticipantsContext(routeEventId);
+
+  if (!adminContext.ok) {
+    return { ok: false, errors: [adminContext.error] };
+  }
+
+  if (adminContext.context.event.id !== eventId) {
     return { ok: false, errors: ['Evento non valido o non coerente.'] };
   }
 
-  const statusError = await assertOperationalWriteAllowed(resolvedEventId);
+  const supabase = createSupabaseServiceClient();
+  const existingParticipant = await loadAuthorizedParticipant(supabase, participantId, eventId);
 
-  if (statusError) {
-    return { ok: false, errors: [statusError] };
+  if (!existingParticipant.ok) {
+    return { ok: false, errors: [existingParticipant.error] };
   }
 
-  const supabase = createSupabaseServiceClient();
-  const { error } = await supabase.from('participants').delete().eq('id', participantId).eq('event_id', resolvedEventId);
+  const { error } = await supabase.from('participants').delete().eq('id', participantId).eq('event_id', eventId);
 
   if (error) {
-    return { ok: false, errors: [error.message] };
+    return { ok: false, errors: ['Eliminazione partecipante non riuscita.'] };
   }
+
+  await writeParticipantAuditLog({
+    action: 'deleted',
+    actorUserId: adminContext.context.user.id,
+    eventId,
+    participant: mapParticipant(existingParticipant.participant),
+    supabase,
+  });
 
   revalidateAdminEventPaths(routeEventId);
 
@@ -178,12 +228,125 @@ export async function deleteParticipantAction(routeEventId: string, eventId: str
   };
 }
 
+type AuthorizedParticipantsContextResult =
+  | {
+      ok: true;
+      context: Awaited<ReturnType<typeof requireEventAdminByRouteId>>;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+async function getAuthorizedParticipantsContext(routeEventId: string): Promise<AuthorizedParticipantsContextResult> {
+  try {
+    const context = await requireEventAdminByRouteId(routeEventId);
+    requireEventOperation(context, 'manage_participants');
+
+    return {
+      ok: true,
+      context,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: getAdminActionErrorMessage(error),
+    };
+  }
+}
+
+type AuthorizedParticipantLookupResult =
+  | {
+      ok: true;
+      participant: ParticipantRow;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+async function loadAuthorizedParticipant(
+  supabase: ReturnType<typeof createSupabaseServiceClient>,
+  participantId: string,
+  eventId: string,
+): Promise<AuthorizedParticipantLookupResult> {
+  const { data, error } = await supabase
+    .from('participants')
+    .select('id,event_id,category_id,display_name,bib_number,status,seed_order')
+    .eq('id', participantId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return { ok: false, error: 'Partecipante non trovato.' };
+  }
+
+  const participant = data as ParticipantRow;
+
+  if (participant.event_id !== eventId) {
+    return { ok: false, error: 'Partecipante non trovato.' };
+  }
+
+  return {
+    ok: true,
+    participant,
+  };
+}
+
+async function writeParticipantAuditLog(input: {
+  action: 'created' | 'deleted' | 'updated';
+  actorUserId: string;
+  eventId: string;
+  participant: Participant;
+  supabase: ReturnType<typeof createSupabaseServiceClient>;
+}): Promise<void> {
+  await input.supabase.from('audit_logs').insert({
+    event_id: input.eventId,
+    entity_type: 'participant',
+    entity_id: input.participant.id,
+    action: input.action,
+    actor_user_id: input.actorUserId,
+    new_data:
+      input.action === 'deleted'
+        ? null
+        : {
+            category_id: input.participant.categoryId,
+            display_name: input.participant.displayName,
+            seed_order: input.participant.seedOrder,
+          },
+    old_data:
+      input.action === 'deleted'
+        ? {
+            category_id: input.participant.categoryId,
+            display_name: input.participant.displayName,
+            seed_order: input.participant.seedOrder,
+          }
+        : null,
+    reason: `Gestione partecipante da area admin: ${input.action}`,
+  });
+}
+
 function revalidateAdminEventPaths(routeEventId: string) {
   revalidatePath('/admin/events');
   revalidatePath(`/admin/events/${routeEventId}`);
   revalidatePath(`/admin/events/${routeEventId}/participants`);
   revalidatePath(`/admin/events/${routeEventId}/timeline`);
   revalidatePath(`/display/${routeEventId}`);
+}
+
+function getDuplicateMemberError(input: ParticipantInput): string | null {
+  const memberKeys = new Set<string>();
+
+  for (const member of input.members) {
+    const memberKey = `${member.firstName.trim().toLowerCase()}|${member.lastName.trim().toLowerCase()}|${member.gender}`;
+
+    if (memberKeys.has(memberKey)) {
+      return 'Membri duplicati non validi.';
+    }
+
+    memberKeys.add(memberKey);
+  }
+
+  return null;
 }
 
 function mapCategory(row: CategoryRow): Category {

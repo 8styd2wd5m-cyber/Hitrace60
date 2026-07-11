@@ -1,6 +1,7 @@
 import { demoCategories, demoParticipants } from './demo-data.ts';
-import { resolveEventIdOrSlug } from './event-id.ts';
-import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
+import { resolveAdminEventIdOrSlug } from './admin-event-id.ts';
+import { createSupabaseUserServerClient } from './supabase/auth-server.ts';
+import { hasSupabaseAuthConfig } from './supabase/server.ts';
 import type { Category, EventStatus, Participant, ParticipantStatus } from './types.ts';
 
 export interface TimelineAdminData {
@@ -33,7 +34,7 @@ interface ParticipantRow {
 }
 
 export async function loadTimelineAdminData(eventId: string): Promise<TimelineAdminData> {
-  if (!hasSupabaseServerConfig()) {
+  if (!hasSupabaseAuthConfig()) {
     return {
       categories: demoCategories.filter((category) => category.eventId === eventId),
       eventStatus: 'live',
@@ -43,13 +44,13 @@ export async function loadTimelineAdminData(eventId: string): Promise<TimelineAd
     };
   }
 
-  const resolvedEventId = await resolveEventIdOrSlug(eventId);
+  const supabase = await createSupabaseUserServerClient();
+  const resolvedEventId = await resolveAdminEventIdOrSlug(eventId, supabase);
 
   if (!resolvedEventId) {
     throw new Error(`Evento "${eventId}" non trovato`);
   }
 
-  const supabase = createSupabaseServiceClient();
   const [eventResult, categoriesResult, participantsResult] = await Promise.all([
     supabase.from('events').select('status').eq('id', resolvedEventId).maybeSingle(),
     supabase
@@ -67,7 +68,11 @@ export async function loadTimelineAdminData(eventId: string): Promise<TimelineAd
   const firstError = eventResult.error ?? categoriesResult.error ?? participantsResult.error;
 
   if (firstError) {
-    throw new Error(firstError.message);
+    throw new Error('Caricamento timeline non riuscito.');
+  }
+
+  if (!eventResult.data) {
+    throw new Error(`Evento "${eventId}" non trovato`);
   }
 
   return {

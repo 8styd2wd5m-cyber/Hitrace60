@@ -1,12 +1,14 @@
 import { demoCategories, demoHeats, demoParticipants, demoStations } from './demo-data.ts';
+import { resolveAdminEventIdOrSlug } from './admin-event-id.ts';
 import {
   LOCAL_DEMO_EVENT_ALIAS,
   getAdminEventRedirectForMistakenJudgeToken,
-  resolveEventIdOrSlug,
   resolveSupabaseEventId,
 } from './event-id.ts';
-import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
+import { createSupabaseUserServerClient } from './supabase/auth-server.ts';
+import { hasSupabaseAuthConfig } from './supabase/server.ts';
 import type { EventStatus } from './types.ts';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export interface AdminEventOverview {
   id: string;
@@ -83,7 +85,7 @@ interface EventRow {
 }
 
 export async function listAdminEvents(): Promise<AdminEventListItem[]> {
-  if (!hasSupabaseServerConfig()) {
+  if (!hasSupabaseAuthConfig()) {
     return [
       {
         id: LOCAL_DEMO_EVENT_ALIAS,
@@ -106,7 +108,7 @@ export async function listAdminEvents(): Promise<AdminEventListItem[]> {
     ];
   }
 
-  const supabase = createSupabaseServiceClient();
+  const supabase = await createSupabaseUserServerClient();
   const { data, error } = await supabase
     .from('events')
     .select('id,name,slug,edition_label,location,starts_at,ends_at,status,timezone,updated_at')
@@ -119,9 +121,9 @@ export async function listAdminEvents(): Promise<AdminEventListItem[]> {
   return Promise.all(
     ((data ?? []) as EventRow[]).map(async (event) => {
       const [participantsCount, heatsCount, scoresCount] = await Promise.all([
-        countRows('participants', event.id),
-        countRows('heats', event.id),
-        countRows('scores', event.id),
+        countRows(supabase, 'participants', event.id),
+        countRows(supabase, 'heats', event.id),
+        countRows(supabase, 'scores', event.id),
       ]);
 
       return {
@@ -156,7 +158,7 @@ export async function loadAdminEventOverview(routeEventId: string): Promise<Admi
     };
   }
 
-  if (!hasSupabaseServerConfig()) {
+  if (!hasSupabaseAuthConfig()) {
     if (routeEventId !== LOCAL_DEMO_EVENT_ALIAS) {
       return {
         status: 'not_found',
@@ -195,7 +197,8 @@ export async function loadAdminEventOverview(routeEventId: string): Promise<Admi
     };
   }
 
-  const resolvedEventId = await resolveEventIdOrSlug(routeEventId);
+  const supabase = await createSupabaseUserServerClient();
+  const resolvedEventId = await resolveAdminEventIdOrSlug(routeEventId, supabase);
 
   if (!resolvedEventId) {
     return {
@@ -204,7 +207,6 @@ export async function loadAdminEventOverview(routeEventId: string): Promise<Admi
     };
   }
 
-  const supabase = createSupabaseServiceClient();
   const { data: eventRow, error: eventError } = await supabase
     .from('events')
     .select('id,name,slug,edition_label,location,starts_at,ends_at,status,timezone,updated_at')
@@ -235,16 +237,16 @@ export async function loadAdminEventOverview(routeEventId: string): Promise<Admi
     completedStationsCount,
     latestScoreAt,
   ] = await Promise.all([
-    countRows('categories', resolvedEventId),
-    countRows('stations', resolvedEventId),
-    countRows('participants', resolvedEventId),
-    countRows('heats', resolvedEventId),
-    countRows('judges', resolvedEventId),
-    countRows('judge_station_assignments', resolvedEventId),
-    countRows('scores', resolvedEventId),
-    countRowsByStatuses('scores', resolvedEventId, ['validated', 'corrected']),
-    countCompletedStations(resolvedEventId),
-    loadLatestScoreAt(resolvedEventId),
+    countRows(supabase, 'categories', resolvedEventId),
+    countRows(supabase, 'stations', resolvedEventId),
+    countRows(supabase, 'participants', resolvedEventId),
+    countRows(supabase, 'heats', resolvedEventId),
+    countRows(supabase, 'judges', resolvedEventId),
+    countRows(supabase, 'judge_station_assignments', resolvedEventId),
+    countRows(supabase, 'scores', resolvedEventId),
+    countRowsByStatuses(supabase, 'scores', resolvedEventId, ['validated', 'corrected']),
+    countCompletedStations(supabase, resolvedEventId),
+    loadLatestScoreAt(supabase, resolvedEventId),
   ]);
 
   return {
@@ -279,8 +281,7 @@ export async function loadAdminEventOverview(routeEventId: string): Promise<Admi
   };
 }
 
-async function countRows(table: string, eventId: string): Promise<number> {
-  const supabase = createSupabaseServiceClient();
+async function countRows(supabase: SupabaseClient, table: string, eventId: string): Promise<number> {
   const { count, error } = await supabase.from(table).select('*', { count: 'exact', head: true }).eq('event_id', eventId);
 
   if (error) {
@@ -290,8 +291,7 @@ async function countRows(table: string, eventId: string): Promise<number> {
   return count ?? 0;
 }
 
-async function countRowsByStatuses(table: string, eventId: string, statuses: string[]): Promise<number> {
-  const supabase = createSupabaseServiceClient();
+async function countRowsByStatuses(supabase: SupabaseClient, table: string, eventId: string, statuses: string[]): Promise<number> {
   const { count, error } = await supabase
     .from(table)
     .select('*', { count: 'exact', head: true })
@@ -305,8 +305,7 @@ async function countRowsByStatuses(table: string, eventId: string, statuses: str
   return count ?? 0;
 }
 
-async function countCompletedStations(eventId: string): Promise<number | null> {
-  const supabase = createSupabaseServiceClient();
+async function countCompletedStations(supabase: SupabaseClient, eventId: string): Promise<number | null> {
   const { data, error } = await supabase
     .from('scores')
     .select('station_id')
@@ -320,8 +319,7 @@ async function countCompletedStations(eventId: string): Promise<number | null> {
   return new Set((data ?? []).map((row) => row.station_id as string)).size;
 }
 
-async function loadLatestScoreAt(eventId: string): Promise<string | null> {
-  const supabase = createSupabaseServiceClient();
+async function loadLatestScoreAt(supabase: SupabaseClient, eventId: string): Promise<string | null> {
   const { data, error } = await supabase
     .from('scores')
     .select('updated_at')

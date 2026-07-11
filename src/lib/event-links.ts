@@ -1,12 +1,13 @@
 import QRCode from 'qrcode';
 import { HITRACE_JUDGE_TOKENS_BY_STATION_SLUG, HITRACE_SCORE_STATIONS, getRaceStationOrderBySlug } from './constants.ts';
 import { demoStations } from './demo-data.ts';
+import { resolveAdminEventIdOrSlug } from './admin-event-id.ts';
 import {
   LOCAL_DEMO_EVENT_ALIAS,
   getAdminEventRedirectForMistakenJudgeToken,
-  resolveEventIdOrSlug,
 } from './event-id.ts';
-import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
+import { createSupabaseUserServerClient } from './supabase/auth-server.ts';
+import { hasSupabaseAuthConfig } from './supabase/server.ts';
 import type { EventStatus } from './types.ts';
 
 export interface EventUtilityLink {
@@ -70,7 +71,7 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
     qrDataUrl: await QRCode.toDataURL(displayUrl, { margin: 1, width: 220 }),
   };
 
-  if (!hasSupabaseServerConfig()) {
+  if (!hasSupabaseAuthConfig()) {
     const judgeLinks = await Promise.all(
       demoStations
         .filter((station) => station.eventId === LOCAL_DEMO_EVENT_ALIAS && station.isScored)
@@ -87,7 +88,8 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
     };
   }
 
-  const resolvedEventId = await resolveEventIdOrSlug(routeEventId);
+  const supabase = await createSupabaseUserServerClient();
+  const resolvedEventId = await resolveAdminEventIdOrSlug(routeEventId, supabase);
 
   if (!resolvedEventId) {
     return {
@@ -100,7 +102,6 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
     };
   }
 
-  const supabase = createSupabaseServiceClient();
   const [eventResult, stationsResult, assignmentsResult] = await Promise.all([
     supabase.from('events').select('status').eq('id', resolvedEventId).maybeSingle(),
     supabase
@@ -118,7 +119,18 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
     return {
       adminLinks,
       displayLink,
-      judgeLinks: await buildMissingJudgeLinks(baseUrl, firstError.message),
+      judgeLinks: await buildMissingJudgeLinks(baseUrl, 'Dati evento non disponibili'),
+      routeEventId,
+      eventStatus: 'draft',
+      source: 'supabase',
+    };
+  }
+
+  if (!eventResult.data) {
+    return {
+      adminLinks,
+      displayLink,
+      judgeLinks: await buildMissingJudgeLinks(baseUrl, `Evento "${routeEventId}" non trovato`),
       routeEventId,
       eventStatus: 'draft',
       source: 'supabase',

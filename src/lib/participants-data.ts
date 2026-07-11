@@ -1,7 +1,9 @@
 import { demoCategories, demoParticipantMembers, demoParticipants } from './demo-data.ts';
-import { resolveEventIdOrSlug } from './event-id.ts';
-import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
+import { resolveAdminEventIdOrSlug } from './admin-event-id.ts';
+import { createSupabaseUserServerClient } from './supabase/auth-server.ts';
+import { hasSupabaseAuthConfig } from './supabase/server.ts';
 import type { Category, EventStatus, Participant, ParticipantMember, ParticipantStatus } from './types.ts';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export interface ParticipantsAdminData {
   categories: Category[];
@@ -43,7 +45,7 @@ interface ParticipantMemberRow {
 }
 
 export async function loadParticipantsAdminData(routeEventId: string): Promise<ParticipantsAdminData> {
-  if (!hasSupabaseServerConfig()) {
+  if (!hasSupabaseAuthConfig()) {
     const participants = demoParticipants.filter((participant) => participant.eventId === routeEventId);
     const participantIds = new Set(participants.map((participant) => participant.id));
 
@@ -57,13 +59,13 @@ export async function loadParticipantsAdminData(routeEventId: string): Promise<P
     };
   }
 
-  const resolvedEventId = await resolveEventIdOrSlug(routeEventId);
+  const supabase = await createSupabaseUserServerClient();
+  const resolvedEventId = await resolveAdminEventIdOrSlug(routeEventId, supabase);
 
   if (!resolvedEventId) {
     throw new Error(`Evento "${routeEventId}" non trovato`);
   }
 
-  const supabase = createSupabaseServiceClient();
   const [eventResult, categoriesResult, participantsResult] = await Promise.all([
     supabase.from('events').select('status').eq('id', resolvedEventId).maybeSingle(),
     supabase
@@ -81,12 +83,16 @@ export async function loadParticipantsAdminData(routeEventId: string): Promise<P
   const firstError = eventResult.error ?? categoriesResult.error ?? participantsResult.error;
 
   if (firstError) {
-    throw new Error(firstError.message);
+    throw new Error('Caricamento partecipanti non riuscito.');
+  }
+
+  if (!eventResult.data) {
+    throw new Error(`Evento "${routeEventId}" non trovato`);
   }
 
   const participants = ((participantsResult.data ?? []) as ParticipantRow[]).map(mapParticipant);
   const participantIds = participants.map((participant) => participant.id);
-  const members = participantIds.length ? await loadMembers(participantIds) : [];
+  const members = participantIds.length ? await loadMembers(supabase, participantIds) : [];
 
   return {
     categories: ((categoriesResult.data ?? []) as CategoryRow[]).map(mapCategory),
@@ -98,8 +104,7 @@ export async function loadParticipantsAdminData(routeEventId: string): Promise<P
   };
 }
 
-async function loadMembers(participantIds: string[]): Promise<ParticipantMember[]> {
-  const supabase = createSupabaseServiceClient();
+async function loadMembers(supabase: SupabaseClient, participantIds: string[]): Promise<ParticipantMember[]> {
   const { data, error } = await supabase
     .from('participant_members')
     .select('id,participant_id,first_name,last_name,gender,member_order')
@@ -107,7 +112,7 @@ async function loadMembers(participantIds: string[]): Promise<ParticipantMember[
     .order('member_order', { ascending: true });
 
   if (error) {
-    throw new Error(error.message);
+    throw new Error('Caricamento membri team non riuscito.');
   }
 
   return ((data ?? []) as ParticipantMemberRow[]).map((row) => ({

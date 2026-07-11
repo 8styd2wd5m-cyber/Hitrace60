@@ -3,6 +3,10 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const migration = readFileSync(join(process.cwd(), 'supabase/migrations/0005_rbac_rls_hardening.sql'), 'utf8');
+const eventAdminsSelfReadMigration = readFileSync(
+  join(process.cwd(), 'supabase/migrations/0006_event_admins_self_read_profiles_self_update.sql'),
+  'utf8',
+);
 
 describe('RBAC RLS hardening migration', () => {
   it('distingue manager da reader e non tratta viewer come manager', () => {
@@ -35,5 +39,18 @@ describe('RBAC RLS hardening migration', () => {
     expect(migration).toContain('create policy "audit managers insert"');
     expect(migration).toContain('actor_user_id = auth.uid()');
     expect(migration).toContain('public.is_event_manager(event_id)');
+  });
+
+  it('aggiunge self-read event_admins senza accesso pubblico o mutation viewer', () => {
+    expect(eventAdminsSelfReadMigration).toContain('create policy "event_admins self read"');
+    expect(eventAdminsSelfReadMigration).toContain('for select using (user_id = auth.uid())');
+    expect(eventAdminsSelfReadMigration).not.toContain('for all');
+    expect(eventAdminsSelfReadMigration).not.toContain('role = ');
+  });
+
+  it('consente update del solo profilo autenticato', () => {
+    expect(eventAdminsSelfReadMigration).toContain('create policy "profiles self update"');
+    expect(eventAdminsSelfReadMigration).toContain('for update using (id = auth.uid())');
+    expect(eventAdminsSelfReadMigration).toContain('with check (id = auth.uid())');
   });
 });

@@ -5,6 +5,7 @@ import {
   hasSupabaseAuthConfig,
   hasSupabaseServiceConfig,
 } from '@/lib/supabase/server.ts';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { EventStatus } from '@/lib/types.ts';
 import { AdminActionError } from './action-errors.ts';
 
@@ -132,8 +133,12 @@ export async function requireAuthenticatedUser(): Promise<AuthenticatedAdminUser
   };
 }
 
-export async function requireEventAdmin(eventId: string, authenticatedUser?: AuthenticatedAdminUser): Promise<EventAdminContext> {
-  const context = await resolveEventRoleContext(eventId, authenticatedUser);
+export async function requireEventAdmin(
+  eventId: string,
+  authenticatedUser?: AuthenticatedAdminUser,
+  authenticatedClient?: SupabaseClient,
+): Promise<EventAdminContext> {
+  const context = await resolveEventRoleContext(eventId, authenticatedUser, authenticatedClient);
 
   if (context.role !== 'owner' && context.role !== 'admin') {
     throw new AdminActionError('not_authorized');
@@ -146,8 +151,9 @@ export async function requireEventPermission(
   eventId: string,
   permission: EventPermission,
   authenticatedUser?: AuthenticatedAdminUser,
+  authenticatedClient?: SupabaseClient,
 ): Promise<EventPermissionContext> {
-  const context = await resolveEventRoleContext(eventId, authenticatedUser);
+  const context = await resolveEventRoleContext(eventId, authenticatedUser, authenticatedClient);
 
   if (!hasEventPermission(context.role, permission)) {
     throw new AdminActionError('permission_denied');
@@ -164,31 +170,32 @@ export async function requireEventPermissionByRouteId(
   permission: EventPermission,
 ): Promise<EventPermissionContext> {
   const user = await requireAuthenticatedUser();
-  const eventId = await resolveAuthorizedEventId(routeEventId);
+  const supabase = await createSupabaseUserServerClient();
+  const eventId = await resolveAuthorizedEventId(routeEventId, supabase);
 
   if (!eventId) {
     throw new AdminActionError('event_not_found');
   }
 
-  return await requireEventPermission(eventId, permission, user);
+  return await requireEventPermission(eventId, permission, user, supabase);
 }
 
 function hasEventPermission(role: EventRole, permission: EventPermission): boolean {
   return (EVENT_ROLE_PERMISSIONS[role] as readonly EventPermission[]).includes(permission);
 }
 
-async function resolveEventRoleContext(eventId: string, authenticatedUser?: AuthenticatedAdminUser): Promise<Omit<EventPermissionContext, 'permission'>> {
+async function resolveEventRoleContext(
+  eventId: string,
+  authenticatedUser?: AuthenticatedAdminUser,
+  authenticatedClient?: SupabaseClient,
+): Promise<Omit<EventPermissionContext, 'permission'>> {
   const user = authenticatedUser ?? (await requireAuthenticatedUser());
 
   if (!isUuid(eventId)) {
     throw new AdminActionError('invalid_input');
   }
 
-  if (!hasSupabaseServiceConfig()) {
-    throw new AdminActionError('service_config_missing');
-  }
-
-  const supabase = createSupabaseServiceClient();
+  const supabase = authenticatedClient ?? (await createSupabaseUserServerClient());
   const { data: eventRow, error: eventError } = await supabase
     .from('events')
     .select('id,owner_id,slug,status')
@@ -222,8 +229,12 @@ async function resolveEventRoleContext(eventId: string, authenticatedUser?: Auth
     .eq('user_id', user.id)
     .maybeSingle();
 
-  if (adminError || !adminRow) {
-    throw new AdminActionError('not_authorized');
+  if (adminError) {
+    throw new AdminActionError('event_not_found');
+  }
+
+  if (!adminRow) {
+    throw new AdminActionError('event_not_found');
   }
 
   const role = (adminRow as EventAdminRow).role;
@@ -241,13 +252,14 @@ async function resolveEventRoleContext(eventId: string, authenticatedUser?: Auth
 
 export async function requireEventAdminByRouteId(routeEventId: string): Promise<EventAdminContext> {
   const user = await requireAuthenticatedUser();
-  const eventId = await resolveAuthorizedEventId(routeEventId);
+  const supabase = await createSupabaseUserServerClient();
+  const eventId = await resolveAuthorizedEventId(routeEventId, supabase);
 
   if (!eventId) {
     throw new AdminActionError('event_not_found');
   }
 
-  return await requireEventAdmin(eventId, user);
+  return await requireEventAdmin(eventId, user, supabase);
 }
 
 export function requireEventOperation(
@@ -283,11 +295,7 @@ export function requireEventOperation(
 }
 
 export async function ensureProfileForUser(user: AuthenticatedAdminUser): Promise<void> {
-  if (!hasSupabaseServiceConfig()) {
-    throw new AdminActionError('service_config_missing');
-  }
-
-  const supabase = createSupabaseServiceClient();
+  const supabase = await createSupabaseUserServerClient();
   const { data: existingProfile, error: profileError } = await supabase.from('profiles').select('id,full_name').eq('id', user.id).maybeSingle();
 
   if (profileError) {
@@ -361,7 +369,7 @@ export async function ensureEventOwnerAdmin(eventId: string, user: Authenticated
   }
 }
 
-async function resolveAuthorizedEventId(routeEventId: string): Promise<string | null> {
+async function resolveAuthorizedEventId(routeEventId: string, supabase: SupabaseClient): Promise<string | null> {
   const normalizedRouteEventId = routeEventId.trim();
 
   if (!normalizedRouteEventId) {
@@ -376,11 +384,6 @@ async function resolveAuthorizedEventId(routeEventId: string): Promise<string | 
     return normalizedRouteEventId;
   }
 
-  if (!hasSupabaseServiceConfig()) {
-    throw new AdminActionError('service_config_missing');
-  }
-
-  const supabase = createSupabaseServiceClient();
   const { data, error } = await supabase.from('events').select('id').eq('slug', normalizedRouteEventId).maybeSingle();
 
   if (error) {

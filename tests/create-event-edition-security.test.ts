@@ -36,6 +36,7 @@ vi.mock('@/lib/supabase/auth-server.ts', () => ({
         error: null,
       })),
     },
+    ...createServiceClientMock(),
   })),
 }));
 

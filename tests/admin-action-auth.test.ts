@@ -15,22 +15,29 @@ const testState = vi.hoisted(() => ({
   authConfig: true,
   serviceConfig: true,
   serviceClientCalls: 0,
+  userClientCalls: 0,
   user: null as { email?: string; id: string } | null,
   eventAdmins: new Map<string, { event_id: string; role: string; user_id: string }>(),
   events: new Map<string, { id: string; owner_id: string; slug: string | null; status: EventStatus }>(),
 }));
 
 vi.mock('@/lib/supabase/auth-server.ts', () => ({
-  createSupabaseUserServerClient: vi.fn(async () => ({
-    auth: {
-      getUser: vi.fn(async () => ({
-        data: {
-          user: testState.user,
-        },
-        error: null,
-      })),
-    },
-  })),
+  createSupabaseUserServerClient: vi.fn(async () => {
+    testState.userClientCalls += 1;
+
+    return {
+      __clientType: 'user',
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: {
+            user: testState.user,
+          },
+          error: null,
+        })),
+      },
+      ...createServiceClientMock(),
+    };
+  }),
 }));
 
 vi.mock('@/lib/supabase/server.ts', () => ({
@@ -52,6 +59,7 @@ describe('admin action authorization helpers', () => {
     testState.authConfig = true;
     testState.serviceConfig = true;
     testState.serviceClientCalls = 0;
+    testState.userClientCalls = 0;
     testState.user = null;
     testState.eventAdmins.clear();
     testState.events.clear();
@@ -215,6 +223,23 @@ describe('admin action authorization helpers', () => {
     });
   });
 
+  it('requireEventPermission usa client autenticato e non service role su successo', async () => {
+    testState.user = {
+      id: ADMIN_ID,
+    };
+    testState.eventAdmins.set(`${EVENT_ID}:${ADMIN_ID}`, {
+      event_id: EVENT_ID,
+      role: 'admin',
+      user_id: ADMIN_ID,
+    });
+
+    await expect(requireEventPermission(EVENT_ID, 'participants.manage')).resolves.toMatchObject({
+      permission: 'participants.manage',
+      role: 'admin',
+    });
+    expect(testState.serviceClientCalls).toBe(0);
+  });
+
   it('requireEventPermission rifiuta ruolo non valido', async () => {
     testState.user = {
       id: ADMIN_ID,
@@ -236,7 +261,7 @@ describe('admin action authorization helpers', () => {
     };
 
     await expect(requireEventAdmin(EVENT_ID)).rejects.toMatchObject({
-      code: 'not_authorized',
+      code: 'event_not_found',
     });
   });
 
@@ -274,6 +299,34 @@ describe('admin action authorization helpers', () => {
       permission: 'timeline.manage',
       role: 'owner',
     });
+  });
+
+  it('requireEventPermissionByRouteId non usa service role per risolvere slug', async () => {
+    testState.user = {
+      id: ADMIN_ID,
+    };
+    testState.eventAdmins.set(`${EVENT_ID}:${ADMIN_ID}`, {
+      event_id: EVENT_ID,
+      role: 'admin',
+      user_id: ADMIN_ID,
+    });
+
+    await expect(requireEventPermissionByRouteId('hitrace60-test', 'event.update_status')).resolves.toMatchObject({
+      permission: 'event.update_status',
+      role: 'admin',
+    });
+    expect(testState.serviceClientCalls).toBe(0);
+  });
+
+  it('requireEventPermissionByRouteId non rivela eventi non autorizzati', async () => {
+    testState.user = {
+      id: OUTSIDER_ID,
+    };
+
+    await expect(requireEventPermissionByRouteId('hitrace60-test', 'event.read')).rejects.toMatchObject({
+      code: 'event_not_found',
+    });
+    expect(testState.serviceClientCalls).toBe(0);
   });
 
   it('requireEventPermission non usa service role prima di auth', async () => {

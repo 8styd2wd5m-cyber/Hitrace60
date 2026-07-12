@@ -81,7 +81,7 @@ interface ExistingHeatRow {
 
 export async function saveTimelineAction(input: SaveTimelineInput): Promise<SaveTimelineResult> {
   if (!hasSupabaseServerConfig()) {
-    return { ok: false, message: 'Supabase non configurato: timeline in fallback demo, niente salvataggio.' };
+    return { ok: false, message: 'Supabase non configurato: salvataggio timeline disabilitato.' };
   }
 
   const minimumValidationError = validateMinimumTimelineInput(input);

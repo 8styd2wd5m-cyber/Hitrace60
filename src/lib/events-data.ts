@@ -1,4 +1,5 @@
 import { demoCategories, demoHeats, demoParticipants, demoStations } from './demo-data.ts';
+import { isDemoFallbackAllowed } from './demo-fallback.ts';
 import { resolveAdminEventIdOrSlug } from './admin-event-id.ts';
 import {
   LOCAL_DEMO_EVENT_ALIAS,
@@ -86,6 +87,10 @@ interface EventRow {
 
 export async function listAdminEvents(): Promise<AdminEventListItem[]> {
   if (!hasSupabaseAuthConfig()) {
+    if (!isDemoFallbackAllowed()) {
+      return [];
+    }
+
     return [
       {
         id: LOCAL_DEMO_EVENT_ALIAS,
@@ -159,6 +164,13 @@ export async function loadAdminEventOverview(routeEventId: string): Promise<Admi
   }
 
   if (!hasSupabaseAuthConfig()) {
+    if (!isDemoFallbackAllowed()) {
+      return {
+        status: 'not_found',
+        message: 'Supabase Auth non configurato e fallback demo disabilitato.',
+      };
+    }
+
     if (routeEventId !== LOCAL_DEMO_EVENT_ALIAS) {
       return {
         status: 'not_found',

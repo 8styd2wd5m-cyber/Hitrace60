@@ -38,8 +38,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
         {!hasSupabaseAuthConfig() || error === 'auth_config_missing' ? (
           <div className="mt-5 rounded-md bg-amber-50 p-3 text-sm font-bold text-amber-900">
-            Supabase Auth non e configurato. In development puoi ancora usare il fallback demo, ma in produzione l&apos;admin resta
-            bloccato.
+            Supabase Auth non e configurato. L&apos;area admin resta bloccata finche non imposti URL e anon key.
           </div>
         ) : null}
 

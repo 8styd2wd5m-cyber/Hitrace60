@@ -1,4 +1,5 @@
 import { demoCategories, demoParticipants } from './demo-data.ts';
+import { isDemoFallbackAllowed } from './demo-fallback.ts';
 import { resolveAdminEventIdOrSlug } from './admin-event-id.ts';
 import { createSupabaseUserServerClient } from './supabase/auth-server.ts';
 import { hasSupabaseAuthConfig } from './supabase/server.ts';
@@ -35,6 +36,10 @@ interface ParticipantRow {
 
 export async function loadTimelineAdminData(eventId: string): Promise<TimelineAdminData> {
   if (!hasSupabaseAuthConfig()) {
+    if (!isDemoFallbackAllowed()) {
+      throw new Error('Supabase Auth non configurato e fallback demo disabilitato.');
+    }
+
     return {
       categories: demoCategories.filter((category) => category.eventId === eventId),
       eventStatus: 'live',

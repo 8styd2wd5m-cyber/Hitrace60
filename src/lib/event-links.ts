@@ -1,6 +1,7 @@
 import QRCode from 'qrcode';
 import { HITRACE_JUDGE_TOKENS_BY_STATION_SLUG, HITRACE_SCORE_STATIONS, getRaceStationOrderBySlug } from './constants.ts';
 import { demoStations } from './demo-data.ts';
+import { isDemoFallbackAllowed } from './demo-fallback.ts';
 import { resolveAdminEventIdOrSlug } from './admin-event-id.ts';
 import {
   LOCAL_DEMO_EVENT_ALIAS,
@@ -53,7 +54,7 @@ interface AssignmentRow {
   active: boolean;
 }
 
-const DEFAULT_LOCAL_BASE_URL = 'http://192.168.31.245:3000';
+const DEFAULT_BASE_URL = 'https://your-staging-domain.vercel.app';
 
 export async function loadEventLinksData(routeEventId: string): Promise<EventLinksData | { redirectEventId: string }> {
   const redirectEventId = getAdminEventRedirectForMistakenJudgeToken(routeEventId);
@@ -72,6 +73,17 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
   };
 
   if (!hasSupabaseAuthConfig()) {
+    if (!isDemoFallbackAllowed()) {
+      return {
+        adminLinks,
+        displayLink,
+        judgeLinks: await buildMissingJudgeLinks(baseUrl, 'Supabase Auth non configurato e fallback demo disabilitato'),
+        routeEventId,
+        eventStatus: 'draft',
+        source: 'supabase',
+      };
+    }
+
     const judgeLinks = await Promise.all(
       demoStations
         .filter((station) => station.eventId === LOCAL_DEMO_EVENT_ALIAS && station.isScored)
@@ -159,7 +171,7 @@ export async function loadEventLinksData(routeEventId: string): Promise<EventLin
 }
 
 function getConfiguredBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_JUDGE_BASE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? DEFAULT_LOCAL_BASE_URL;
+  return process.env.NEXT_PUBLIC_JUDGE_BASE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? DEFAULT_BASE_URL;
 }
 
 async function buildAdminLinks(baseUrl: string, routeEventId: string): Promise<EventUtilityLink[]> {

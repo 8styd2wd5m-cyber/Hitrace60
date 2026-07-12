@@ -1,7 +1,10 @@
 import Link from 'next/link';
 import { DEMO_EVENT_ID, DEMO_SEEDED_JUDGE_TOKEN } from '@/lib/demo-data.ts';
+import { isDemoFallbackAllowed } from '@/lib/demo-fallback.ts';
 
 export default function HomePage() {
+  const demoFallbackAllowed = isDemoFallbackAllowed();
+
   return (
     <main className="min-h-screen bg-zinc-950 px-6 py-10 text-white">
       <div className="mx-auto flex max-w-5xl flex-col gap-10">
@@ -16,23 +19,27 @@ export default function HomePage() {
         <section className="grid gap-4 md:grid-cols-4">
           <Link
             className="rounded-lg border border-white/15 bg-white p-5 text-zinc-950 transition hover:-translate-y-0.5"
-            href={`/display/${DEMO_EVENT_ID}`}
+            href={demoFallbackAllowed ? `/display/${DEMO_EVENT_ID}` : '/admin/events'}
           >
             <span className="text-sm font-bold uppercase text-red-600">Megaschermo</span>
             <strong className="mt-3 block text-2xl">Leaderboard live</strong>
-            <span className="mt-2 block text-sm text-zinc-600">Classifica demo leggibile da lontano.</span>
+            <span className="mt-2 block text-sm text-zinc-600">
+              {demoFallbackAllowed ? 'Classifica demo leggibile da lontano.' : 'Apri una edizione reale dal pannello admin.'}
+            </span>
           </Link>
           <Link
             className="rounded-lg border border-white/15 bg-lime-300 p-5 text-zinc-950 transition hover:-translate-y-0.5"
-            href={`/judge/${DEMO_SEEDED_JUDGE_TOKEN}`}
+            href={demoFallbackAllowed ? `/judge/${DEMO_SEEDED_JUDGE_TOKEN}` : '/admin/events'}
           >
             <span className="text-sm font-bold uppercase text-zinc-700">Giudice</span>
             <strong className="mt-3 block text-2xl">Score mobile</strong>
-            <span className="mt-2 block text-sm text-zinc-700">Inserimento touch-friendly per Echo Bike.</span>
+            <span className="mt-2 block text-sm text-zinc-700">
+              {demoFallbackAllowed ? 'Inserimento touch-friendly per Echo Bike.' : 'Usa i Live Links di una edizione reale.'}
+            </span>
           </Link>
           <Link
             className="rounded-lg border border-white/15 bg-zinc-900 p-5 text-white transition hover:-translate-y-0.5"
-            href={`/admin/events/${DEMO_EVENT_ID}/timeline`}
+            href={demoFallbackAllowed ? `/admin/events/${DEMO_EVENT_ID}/timeline` : '/admin/events'}
           >
             <span className="text-sm font-bold uppercase text-lime-300">Admin</span>
             <strong className="mt-3 block text-2xl">Timeline builder</strong>
@@ -40,7 +47,7 @@ export default function HomePage() {
           </Link>
           <Link
             className="rounded-lg border border-white/15 bg-white/10 p-5 text-white transition hover:-translate-y-0.5"
-            href={`/admin/events/${DEMO_EVENT_ID}/participants`}
+            href={demoFallbackAllowed ? `/admin/events/${DEMO_EVENT_ID}/participants` : '/admin/events'}
           >
             <span className="text-sm font-bold uppercase text-lime-300">Admin</span>
             <strong className="mt-3 block text-2xl">Partecipanti</strong>

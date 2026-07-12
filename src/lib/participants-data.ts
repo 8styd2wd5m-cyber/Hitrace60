@@ -1,4 +1,5 @@
 import { demoCategories, demoParticipantMembers, demoParticipants } from './demo-data.ts';
+import { isDemoFallbackAllowed } from './demo-fallback.ts';
 import { resolveAdminEventIdOrSlug } from './admin-event-id.ts';
 import { createSupabaseUserServerClient } from './supabase/auth-server.ts';
 import { hasSupabaseAuthConfig } from './supabase/server.ts';
@@ -46,6 +47,10 @@ interface ParticipantMemberRow {
 
 export async function loadParticipantsAdminData(routeEventId: string): Promise<ParticipantsAdminData> {
   if (!hasSupabaseAuthConfig()) {
+    if (!isDemoFallbackAllowed()) {
+      throw new Error('Supabase Auth non configurato e fallback demo disabilitato.');
+    }
+
     const participants = demoParticipants.filter((participant) => participant.eventId === routeEventId);
     const participantIds = new Set(participants.map((participant) => participant.id));
 

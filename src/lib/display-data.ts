@@ -1,5 +1,6 @@
 import { DISPLAY_LEADERBOARD_SCORE_STATUSES, getRaceStationOrderBySlug } from './constants.ts';
 import { demoCategories, demoHeats, demoParticipants, demoStations } from './demo-data.ts';
+import { isDemoFallbackAllowed } from './demo-fallback.ts';
 import { resolveEventIdOrSlug } from './event-id.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
 import type { Category, EventStatus, Heat, Participant, ParticipantStatus, Score, ScoreStatus, Station } from './types.ts';
@@ -99,6 +100,10 @@ interface ScoreRow {
 
 export async function loadDisplayPageData(eventId: string): Promise<DisplayPageData> {
   if (!hasSupabaseServerConfig()) {
+    if (!isDemoFallbackAllowed()) {
+      return emptySupabaseDisplayData(eventId);
+    }
+
     return {
       categories: demoCategories.filter((category) => category.eventId === eventId),
       event: {

@@ -1,4 +1,5 @@
 import { LOCAL_DEMO_EVENT_ALIAS, SEEDED_SUPABASE_DEMO_EVENT_ID, isUuid } from '@/lib/event-id.ts';
+import { isDemoFallbackAllowed } from '@/lib/demo-fallback.ts';
 import { createSupabaseUserServerClient } from '@/lib/supabase/auth-server.ts';
 import {
   createSupabaseServiceClient,
@@ -376,7 +377,7 @@ async function resolveAuthorizedEventId(routeEventId: string, supabase: Supabase
     throw new AdminActionError('invalid_input');
   }
 
-  if (normalizedRouteEventId === LOCAL_DEMO_EVENT_ALIAS) {
+  if (isDemoFallbackAllowed() && normalizedRouteEventId === LOCAL_DEMO_EVENT_ALIAS) {
     return SEEDED_SUPABASE_DEMO_EVENT_ID;
   }
 

@@ -1,4 +1,5 @@
 import { HITRACE_JUDGE_TOKENS_BY_STATION_SLUG } from './constants.ts';
+import { isDemoFallbackAllowed } from './demo-fallback.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
 
 export const SEEDED_SUPABASE_DEMO_EVENT_ID = '10000000-0000-0000-0000-000000000001';
@@ -12,11 +13,11 @@ const knownJudgeTokens = new Set<string>([
 ]);
 
 export function resolveSupabaseEventId(eventId: string): string {
-  return eventId === LOCAL_DEMO_EVENT_ALIAS ? SEEDED_SUPABASE_DEMO_EVENT_ID : eventId;
+  return isDemoFallbackAllowed() && eventId === LOCAL_DEMO_EVENT_ALIAS ? SEEDED_SUPABASE_DEMO_EVENT_ID : eventId;
 }
 
 export async function resolveEventIdOrSlug(input: string): Promise<string | null> {
-  if (input === LOCAL_DEMO_EVENT_ALIAS) {
+  if (isDemoFallbackAllowed() && input === LOCAL_DEMO_EVENT_ALIAS) {
     return SEEDED_SUPABASE_DEMO_EVENT_ID;
   }
 
@@ -47,5 +48,5 @@ export function isKnownJudgeToken(value: string): boolean {
 }
 
 export function getAdminEventRedirectForMistakenJudgeToken(value: string): string | null {
-  return isKnownJudgeToken(value) ? LOCAL_DEMO_EVENT_ALIAS : null;
+  return isDemoFallbackAllowed() && isKnownJudgeToken(value) ? LOCAL_DEMO_EVENT_ALIAS : null;
 }

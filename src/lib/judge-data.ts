@@ -7,6 +7,7 @@ import {
   demoCategories,
   getDemoJudgeAssignments,
 } from './demo-data.ts';
+import { isDemoFallbackAllowed } from './demo-fallback.ts';
 import { buildJudgeScorecardRows } from './scorecards.ts';
 import { createSupabaseServiceClient, hasSupabaseServerConfig } from './supabase/server.ts';
 import { canJudgeSubmitScores } from './event-status.ts';
@@ -127,7 +128,7 @@ interface ScoreRow {
 
 export async function loadJudgePageData(token: string): Promise<JudgePageLoadResult> {
   if (!hasSupabaseServerConfig()) {
-    if (process.env.NODE_ENV === 'development') {
+    if (isDemoFallbackAllowed()) {
       return loadDemoJudgePageData(token);
     }
 

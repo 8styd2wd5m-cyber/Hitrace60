@@ -8,3 +8,5 @@ coverage
 *.log
 .pnpm-store
 tsconfig.tsbuildinfo
+
+supabase/.temp/
